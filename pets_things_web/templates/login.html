@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Updated title to reflect both auth options -->
+    <title>Welcome - Pets & Things Store Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-page">
+    <!-- Decorative paw prints background elements -->
+    <div class="paw-decoration paw-1"></div>
+    <div class="paw-decoration paw-2"></div>
+    <div class="paw-decoration paw-3"></div>
+    <div class="paw-decoration paw-4"></div>
+
+    <main class="login-container">
+        <div class="login-card">
+            <!-- Pet store logo/image -->
+            <div class="logo-section">
+                <img 
+                    src="{{ url_for('static', filename='images/pets-logo.png') }}" 
+                    alt="Pets & Things Logo" 
+                    class="store-logo"
+                >
+            </div>
+
+            <!-- Welcome heading -->
+            <h1 class="welcome-title">Welcome to Pets & Things</h1>
+            <p class="welcome-subtitle">Store Management System</p>
+
+            <!-- Added tab switcher for Sign In / Sign Up -->
+            <div class="auth-tabs">
+                <button type="button" class="auth-tab active" data-tab="signin">Sign In</button>
+                <button type="button" class="auth-tab" data-tab="signup">Sign Up</button>
+            </div>
+
+            <!-- Error message display -->
+            {% if error %}
+            <div class="error-message">
+                <span class="error-icon">⚠</span>
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <!-- Success message display -->
+            {% if success %}
+            <div class="success-message">
+                <span class="success-icon">✓</span>
+                {{ success }}
+            </div>
+            {% endif %}
+
+            <!-- Sign In form (shown by default) -->
+            <form method="POST" action="{{ url_for('login') }}" class="auth-form" id="signin-form">
+                <div class="form-group">
+                    <label for="signin-email">Email Address</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">✉</span>
+                        <input 
+                            type="email" 
+                            id="signin-email" 
+                            name="email" 
+                            placeholder="Enter your email"
+                            required
+                            autocomplete="email"
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="signin-password">Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input 
+                            type="password" 
+                            id="signin-password" 
+                            name="password" 
+                            placeholder="Enter your password"
+                            required
+                            autocomplete="current-password"
+                        >
+                    </div>
+                </div>
+
+                <button type="submit" class="auth-button">
+                    <span>Sign In</span>
+                    <span class="button-paw">🐾</span>
+                </button>
+            </form>
+
+            <!-- Sign Up form (hidden by default) -->
+            <!-- Changed url_for('signup') to plain /signup path to avoid BuildError -->
+            <form method="POST" action="/signup" class="auth-form hidden" id="signup-form">
+                <!-- Added info notice for customer-only signup -->
+                <div class="info-notice">
+                    <span class="info-icon">ℹ</span>
+                    <span>Sign Up is for <strong>customers only</strong>. Employees and admins are created by the store owner.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="signup-name">Full Name</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">👤</span>
+                        <input 
+                            type="text" 
+                            id="signup-name" 
+                            name="name" 
+                            placeholder="Enter your full name"
+                            required
+                            autocomplete="name"
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="signup-email">Email Address</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">✉</span>
+                        <input 
+                            type="email" 
+                            id="signup-email" 
+                            name="email" 
+                            placeholder="Enter your email"
+                            required
+                            autocomplete="email"
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="signup-password">Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input 
+                            type="password" 
+                            id="signup-password" 
+                            name="password" 
+                            placeholder="Create a password"
+                            required
+                            autocomplete="new-password"
+                            minlength="8"
+                        >
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="signup-confirm">Confirm Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input 
+                            type="password" 
+                            id="signup-confirm" 
+                            name="confirm_password" 
+                            placeholder="Confirm your password"
+                            required
+                            autocomplete="new-password"
+                            minlength="8"
+                        >
+                    </div>
+                </div>
+
+                <button type="submit" class="auth-button">
+                    <span>Create Account</span>
+                    <span class="button-paw">🐾</span>
+                </button>
+            </form>
+
+            <!-- Decorative pet images -->
+            <div class="pet-decorations">
+                <img 
+                    src="{{ url_for('static', filename='images/dog.png') }}" 
+                    alt="Friendly dog" 
+                    class="pet-image pet-dog"
+                >
+                <img 
+                    src="{{ url_for('static', filename='images/cat.png') }}" 
+                    alt="Cute cat" 
+                    class="pet-image pet-cat"
+                >
+            </div>
+        </div>
+
+        <!-- Footer text -->
+        <p class="footer-text">
+            Caring for your furry friends since 2020 🐕 🐈
+        </p>
+    </main>
+
+    <!-- Added JavaScript for tab switching -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabs = document.querySelectorAll('.auth-tab');
+            const signinForm = document.getElementById('signin-form');
+            const signupForm = document.getElementById('signup-form');
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Remove active class from all tabs
+                    tabs.forEach(t => t.classList.remove('active'));
+                    // Add active class to clicked tab
+                    this.classList.add('active');
+
+                    // Toggle form visibility
+                    if (this.dataset.tab === 'signin') {
+                        signinForm.classList.remove('hidden');
+                        signupForm.classList.add('hidden');
+                    } else {
+                        signinForm.classList.add('hidden');
+                        signupForm.classList.remove('hidden');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

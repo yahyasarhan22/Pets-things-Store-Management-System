@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Pets & Things{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-container">
+            <!-- Logo and Brand -->
+            <a href="{{ url_for('dashboard') }}" class="navbar-brand">
+                <img 
+                    src="{{ url_for('static', filename='images/logo.png') }}" 
+                    alt="Pets & Things Logo" 
+                    class="navbar-logo"
+                >
+                <span class="navbar-title">Pets & Things</span>
+            </a>
+
+            <!-- Mobile Menu Toggle -->
+            <button class="navbar-toggle" id="navbar-toggle" aria-label="Toggle navigation">
+                <span class="toggle-bar"></span>
+                <span class="toggle-bar"></span>
+                <span class="toggle-bar"></span>
+            </button>
+
+            <!-- Navigation Links -->
+            <ul class="navbar-menu" id="navbar-menu">
+                <li><a href="/dashboard" class="navbar-link">Dashboard</a></li>
+                <li><a href="/products" class="navbar-link">Products</a></li>
+                <li><a href="/sales" class="navbar-link">Sales</a></li>
+                <li><a href="/purchases" class="navbar-link">Purchases</a></li>
+                <li><a href="/bookings" class="navbar-link">Bookings</a></li>
+                <li><a href="/reports" class="navbar-link">Reports</a></li>
+                <li><a href="/logout" class="navbar-link navbar-logout">Logout</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>&copy; 2026 Pets & Things Store Management. All rights reserved.</p>
+    </footer>
+
+    <!-- Mobile Menu Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggle = document.getElementById('navbar-toggle');
+            const menu = document.getElementById('navbar-menu');
+
+            toggle.addEventListener('click', function() {
+                menu.classList.toggle('active');
+                toggle.classList.toggle('active');
+            });
+        });
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

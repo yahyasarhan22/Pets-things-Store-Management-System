@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Pets & Things{% endblock %}
+
+{% block content %}
+<!-- Hero Banner -->
+<section class="dashboard-hero">
+    <div class="hero-overlay"></div>
+    <div class="hero-content">
+        <img 
+            src="{{ url_for('static', filename='images/paw.png') }}" 
+            alt="Paw icon" 
+            class="hero-paw"
+        >
+        <h1 class="hero-title">
+            Welcome, {{ role|default('User') }}!
+        </h1>
+        <p class="hero-subtitle">Manage your pet store with ease</p>
+    </div>
+</section>
+
+<!-- KPI Cards Section -->
+<section class="dashboard-stats">
+    <div class="stats-container">
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-products">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Products">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ products_count|default('--') }}</span>
+                <span class="stat-label">Products Count</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-stock">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Low Stock">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ low_stock|default('--') }}</span>
+                <span class="stat-label">Low Stock Items</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-sales">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Sales">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ today_sales|default('--') }}</span>
+                <span class="stat-label">Today Sales</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-bookings">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Bookings">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ active_bookings|default('--') }}</span>
+                <span class="stat-label">Active Bookings</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Quick Actions Section -->
+<section class="dashboard-actions">
+    <h2 class="section-title">Quick Actions</h2>
+    <div class="actions-container">
+        <a href="/products/add" class="action-card">
+            <div class="action-icon">+</div>
+            <span class="action-label">Add Product</span>
+        </a>
+        <a href="/sales/new" class="action-card">
+            <div class="action-icon">$</div>
+            <span class="action-label">New Sale</span>
+        </a>
+        <a href="/bookings/new" class="action-card">
+            <div class="action-icon">B</div>
+            <span class="action-label">New Booking</span>
+        </a>
+        <a href="/reports" class="action-card">
+            <div class="action-icon">R</div>
+            <span class="action-label">View Reports</span>
+        </a>
+    </div>
+</section>
+{% endblock %}
