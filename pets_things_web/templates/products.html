@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}
+{{ page_title|default('Products') }} - Pets & Things
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section class="page-header">
+    <div class="page-header-content">
+        <div class="page-title-section">
+            <h1 class="page-title">
+                <span class="title-icon">🐾</span>
+                {{ page_title|default('Products') }}
+            </h1>
+            <p class="page-subtitle">Manage your store inventory</p>
+        </div>
+        <a href="/products/add" class="btn-primary">
+            <span class="btn-icon">+</span>
+            Add Product
+        </a>
+    </div>
+</section>
+
+<!-- Products Section -->
+<section class="products-section">
+    <div class="products-container">
+        {% if products and products|length > 0 %}
+        <!-- Products Table Card -->
+        <div class="table-card">
+            <div class="table-wrapper">
+                <table class="products-table">
+                    <thead>
+                        <tr>
+                            <th>
+                                <span class="th-content">
+                                    <span class="th-icon">🦴</span>
+                                    Product Name
+                                </span>
+                            </th>
+                            <th>
+                                <span class="th-content">
+                                    <span class="th-icon">📁</span>
+                                    Category
+                                </span>
+                            </th>
+                            <th>
+                                <span class="th-content">
+                                    <span class="th-icon">💰</span>
+                                    Price
+                                </span>
+                            </th>
+                            <th>
+                                <span class="th-content">
+                                    <span class="th-icon">📊</span>
+                                    Status
+                                </span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in products %}
+                        <tr class="{% if not product.is_active %}row-inactive{% endif %}">
+                            <td class="product-name-cell">
+                                <span class="product-name">{{ product.product_name }}</span>
+                            </td>
+                            <td>
+                                <span class="category-badge">{{ product.category_name }}</span>
+                            </td>
+                            <td>
+                                <!-- Change ₪ back to $ if you prefer -->
+                                <span class="price">₪{{ "%.2f"|format(product.unit_price) }}</span>
+                            </td>
+                            <td>
+                                {% if product.is_active %}
+                                <span class="status-badge status-active">Active</span>
+                                {% else %}
+                                <span class="status-badge status-inactive">Inactive</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <!-- Empty State -->
+        <div class="empty-state">
+            <div class="empty-icon">🐕</div>
+            <h2 class="empty-title">No Products Yet</h2>
+            <p class="empty-text">Your inventory is empty. Start by adding your first product to the store.</p>
+            <a href="/products/add" class="btn-primary">
+                <span class="btn-icon">+</span>
+                Add Your First Product
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

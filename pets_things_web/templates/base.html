@@ -29,12 +29,24 @@
 
             <!-- Navigation Links -->
             <ul class="navbar-menu" id="navbar-menu">
-                <li><a href="/dashboard" class="navbar-link">Dashboard</a></li>
-                <li><a href="/products" class="navbar-link">Products</a></li>
-                <li><a href="/sales" class="navbar-link">Sales</a></li>
-                <li><a href="/purchases" class="navbar-link">Purchases</a></li>
-                <li><a href="/bookings" class="navbar-link">Bookings</a></li>
-                <li><a href="/reports" class="navbar-link">Reports</a></li>
+                <li><a href="/dashboard" class="navbar-link {% if request.path == '/dashboard' %}active{% endif %}">Dashboard</a></li>
+                
+                <!-- Products dropdown menu with hover functionality -->
+                <li class="nav-dropdown">
+                    <a href="/products" class="navbar-link dropdown-trigger {% if '/products' in request.path %}active{% endif %}">
+                        Products
+                        <span class="dropdown-arrow">&#9662;</span>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a href="/products" class="dropdown-link">All Products</a></li>
+                        <li><a href="/products/active" class="dropdown-link">Active Products</a></li>
+                    </ul>
+                </li>
+                
+                <li><a href="/sales" class="navbar-link {% if request.path == '/sales' %}active{% endif %}">Sales</a></li>
+                <li><a href="/purchases" class="navbar-link {% if request.path == '/purchases' %}active{% endif %}">Purchases</a></li>
+                <li><a href="/bookings" class="navbar-link {% if request.path == '/bookings' %}active{% endif %}">Bookings</a></li>
+                <li><a href="/reports" class="navbar-link {% if request.path == '/reports' %}active{% endif %}">Reports</a></li>
                 <li><a href="/logout" class="navbar-link navbar-logout">Logout</a></li>
             </ul>
         </div>

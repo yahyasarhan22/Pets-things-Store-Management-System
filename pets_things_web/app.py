@@ -1,3 +1,4 @@
+from binascii import Error
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
@@ -48,6 +49,81 @@ def role_required(*allowed_roles):
     return decorator
 
 # ==================== ROUTES ====================
+from flask import render_template
+from db import get_connection
+
+@app.route('/products')
+def products():
+    """Display all products with category information"""
+    conn = get_connection()
+    
+    if not conn:
+        return render_template('products.html', 
+                             products=[], 
+                             error="Unable to connect to database")
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        query = """
+            SELECT 
+                p.product_id,
+                p.product_name,
+                c.category_name,
+                p.unit_price,
+                p.description,
+                p.is_active
+            FROM product p
+            INNER JOIN category c ON p.category_id = c.category_id
+            ORDER BY p.product_name ASC
+        """
+        
+        cursor.execute(query)
+        products = cursor.fetchall()
+        
+        return render_template('products.html', products=products, error=None)
+        
+    except Error as e:
+        print(f"Database query error: {e}")
+        return render_template('products.html', 
+                             products=[], 
+                             error="Error retrieving products")
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+@app.route("/products/active")
+def active_products():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("""
+        SELECT 
+            p.product_id,
+            p.product_name,
+            c.category_name,
+            p.unit_price,
+            p.description,
+            p.is_active
+        FROM product p
+        INNER JOIN category c ON p.category_id = c.category_id
+        WHERE p.is_active = 1
+        ORDER BY p.product_name ASC
+    """)
+
+    products = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # We pass a custom title so the same template can display a different heading
+    return render_template("products.html",
+                           products=products,
+                           error=None,
+                           page_title="Active Products")
+
+
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -186,6 +262,8 @@ def page_not_found(e):
 @app.errorhandler(500)
 def internal_error(e):
     return render_template('base.html', error='Internal server error'), 500
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
