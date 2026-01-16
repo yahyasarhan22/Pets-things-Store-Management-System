@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}New Sale - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">🧾</span>New Sale</h1>
+      <p class="page-subtitle">Create a new sale and add items to it</p>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-container">
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.8rem;">📋</span>
+          <h2 style="margin: 0; font-size: 1.4rem; font-weight: 600; color: var(--text-primary);">Sale Information</h2>
+        </div>
+
+        {% if error %}
+          <div class="alert error" style="margin-bottom: 20px;">
+            <span class="error-icon">⚠️</span>
+            {{ error }}
+          </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('sales_new') }}">
+          <!-- Branch Selection -->
+          <div class="form-group">
+            <label class="form-label" for="branch_id">
+              <span style="color: var(--error-color);">*</span> Branch
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏪</span>
+              <select class="form-input" id="branch_id" name="branch_id" required style="padding-left: 40px;">
+                <option value="">Select a branch</option>
+                {% for b in branches %}
+                  <option value="{{ b.branch_id }}"
+                    {% if selected_branch_id == b.branch_id %}selected{% endif %}>
+                    {{ b.branch_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Select the branch where this sale is occurring</p>
+          </div>
+
+          <!-- Customer Selection -->
+          <div class="form-group">
+            <label class="form-label" for="customer_id">
+              Customer <span style="font-size: 0.85rem; color: var(--text-secondary);">(Optional)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">👤</span>
+              <select class="form-input" id="customer_id" name="customer_id" style="padding-left: 40px;">
+                <option value="">Walk-in Customer</option>
+                {% for c in customers %}
+                  <option value="{{ c.user_id }}"
+                    {% if selected_customer_id == c.user_id %}selected{% endif %}>
+                    {{ c.full_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Leave empty for walk-in customers</p>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="form-actions" style="margin-top: 32px; display: flex; gap: 12px;">
+            <button type="submit" class="btn-primary" style="flex: 1;">
+              <span>✅</span> Start Sale
+            </button>
+            <a href="{{ url_for('dashboard') }}" class="btn-secondary" style="flex: 1; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <span>❌</span> Cancel
+            </a>
+          </div>
+        </form>
+
+        <!-- Info Box -->
+        <div class="info-notice" style="margin-top: 24px;">
+          <span class="info-icon">ℹ️</span>
+          <div class="info-text">
+            <strong>Quick Tip:</strong> After starting the sale, you'll be able to add items, view the total, and complete the transaction.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

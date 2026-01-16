@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Top Products Report - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">📈</span>Top-Selling Products</h1>
+      <p class="page-subtitle">See best sellers by quantity or revenue</p>
+    </div>
+
+    <div class="header-actions">
+      <form method="GET" action="{{ request.path }}" class="filter-form">
+        <div class="filter-group">
+          <label class="filter-label" for="branch_id">Branch</label>
+          <select class="filter-select" id="branch_id" name="branch_id">
+            <option value="">All Branches</option>
+            {% for b in branches %}
+              <option value="{{ b.branch_id }}" {% if selected_branch_id == b.branch_id %}selected{% endif %}>
+                {{ b.branch_name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="date_from">From</label>
+          <input class="filter-select" type="date" id="date_from" name="date_from" value="{{ date_from }}">
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="date_to">To</label>
+          <input class="filter-select" type="date" id="date_to" name="date_to" value="{{ date_to }}">
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="metric">Sort By</label>
+          <select class="filter-select" id="metric" name="metric">
+            <option value="qty" {% if metric == "qty" %}selected{% endif %}>Quantity</option>
+            <option value="revenue" {% if metric == "revenue" %}selected{% endif %}>Revenue</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="top">Top</label>
+          <select class="filter-select" id="top" name="top">
+            <option value="5"  {% if top == 5 %}selected{% endif %}>5</option>
+            <option value="10" {% if top == 10 %}selected{% endif %}>10</option>
+            <option value="20" {% if top == 20 %}selected{% endif %}>20</option>
+            <option value="50" {% if top == 50 %}selected{% endif %}>50</option>
+          </select>
+        </div>
+
+        <div class="filter-buttons">
+          <button type="submit" class="filter-btn apply-btn">Apply</button>
+          <a href="{{ url_for('report_top_products') }}" class="filter-btn reset-btn">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="inventory-section">
+  <div class="inventory-container">
+
+    {% if error %}
+      <div class="alert error"><span class="error-icon">⚠️</span>{{ error }}</div>
+    {% endif %}
+
+    {% if rows and rows|length > 0 %}
+      <div class="table-card">
+        <div class="table-wrapper">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Product</th>
+                <th>Category</th>
+                <th>Total Qty Sold</th>
+                <th>Total Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+                <tr>
+                  <td><strong>{{ loop.index }}</strong></td>
+                  <td>{{ r.product_name }}</td>
+                  <td><span class="category-badge">{{ r.category_name }}</span></td>
+                  <td><strong>{{ r.total_qty }}</strong></td>
+                  <td><strong>{{ "%.2f"|format(r.total_revenue or 0) }} $</strong></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">📈</div>
+        <h2 class="empty-title">No results</h2>
+        <p class="empty-text">Try a different date range or branch.</p>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+{% endblock %}

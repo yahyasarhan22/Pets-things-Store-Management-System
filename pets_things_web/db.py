@@ -108,3 +108,32 @@ def email_exists(email):
         if conn.is_connected():
             cursor.close()
             conn.close()
+            
+def get_today_sales_summary():
+    conn = get_connection()
+    if not conn:
+        return {"count": 0, "total": 0.0}
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT
+                COUNT(*) AS sale_count,
+                COALESCE(SUM(total_amount), 0) AS total_amount
+            FROM sale
+            WHERE DATE(sale_date) = CURDATE()
+        """)
+        row = cur.fetchone()
+        return {
+            "count": row["sale_count"] or 0,
+            "total": float(row["total_amount"] or 0)
+        }
+    except Exception as e:
+        print("today sales summary error:", e)
+        return {"count": 0, "total": 0.0}
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass

@@ -69,6 +69,74 @@ CREATE TABLE stock (
     ON DELETE CASCADE
 );
 
+CREATE TABLE sale (
+  sale_id INT AUTO_INCREMENT PRIMARY KEY,
+  branch_id INT NOT NULL,
+  sale_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  employee_id INT NOT NULL,
+  customer_id INT NULL,
+  total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  notes VARCHAR(255) NULL,
+
+  CONSTRAINT fk_sale_branch
+    FOREIGN KEY (branch_id) REFERENCES branch(branch_id),
+
+  CONSTRAINT fk_sale_employee
+    FOREIGN KEY (employee_id) REFERENCES users(user_id),
+
+  CONSTRAINT fk_sale_customer
+    FOREIGN KEY (customer_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE sale_line (
+  sale_line_id INT AUTO_INCREMENT PRIMARY KEY,
+  sale_id INT NOT NULL,
+  product_id INT NOT NULL,
+  quantity INT NOT NULL,
+  unit_price DECIMAL(10,2) NOT NULL,
+  line_total DECIMAL(10,2) NOT NULL,
+
+  CONSTRAINT fk_sale_line_sale
+    FOREIGN KEY (sale_id) REFERENCES sale(sale_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_sale_line_product
+    FOREIGN KEY (product_id) REFERENCES product(product_id),
+
+  CONSTRAINT chk_sale_line_qty
+    CHECK (quantity > 0)
+);
+
+CREATE TABLE stock_movement (
+  movement_id INT AUTO_INCREMENT PRIMARY KEY,
+
+  branch_id INT NOT NULL,
+  product_id INT NOT NULL,
+
+  change_qty INT NOT NULL, -- + for restock, - for sale
+  movement_type VARCHAR(20) NOT NULL, -- 'RESTOCK' or 'SALE'
+
+  reference_sale_id INT NULL, -- filled only for SALE
+  performed_by INT NOT NULL,  -- user_id (employee/admin)
+  movement_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(255) NULL,
+
+  CONSTRAINT fk_sm_branch
+    FOREIGN KEY (branch_id) REFERENCES branch(branch_id),
+
+  CONSTRAINT fk_sm_product
+    FOREIGN KEY (product_id) REFERENCES product(product_id),
+
+  CONSTRAINT fk_sm_user
+    FOREIGN KEY (performed_by) REFERENCES users(user_id),
+
+  CONSTRAINT fk_sm_sale
+    FOREIGN KEY (reference_sale_id) REFERENCES sale(sale_id)
+);
+
+
+
+
 -- =========================================================
 -- 03) INSERT SAMPLE DATA (SMALL & CLEAN)
 -- =========================================================
@@ -189,3 +257,4 @@ show tables;
 SELECT DATABASE();
 SELECT COUNT(*) FROM users;
 SELECT * FROM users ORDER BY 1 DESC LIMIT 5;
+select * from product;

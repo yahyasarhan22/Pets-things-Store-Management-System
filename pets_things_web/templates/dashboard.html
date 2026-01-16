@@ -47,15 +47,22 @@
             </div>
         </a>
 
-        <div class="stat-card">
+        <a href="{{ url_for('sales_list') }}" class="stat-card" style="cursor: pointer; text-decoration: none; color: inherit;">
             <div class="stat-icon stat-icon-sales">
                 <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Sales">
             </div>
             <div class="stat-info">
-                <span class="stat-value">{{ today_sales|default('--') }}</span>
+                {% if today_sales %}
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">{{ today_sales.total_sales|default(0) }} sales</div>
+                        <span class="stat-value" style="font-size: 1.8rem;">${{ "%.2f"|format(today_sales.total_revenue or 0) }}</span>
+                    </div>
+                {% else %}
+                    <span class="stat-value">--</span>
+                {% endif %}
                 <span class="stat-label">Today Sales</span>
             </div>
-        </div>
+        </a>
 
         <div class="stat-card">
             <div class="stat-icon stat-icon-bookings">

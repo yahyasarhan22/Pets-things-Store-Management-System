@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Sales - Pets & Things{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">💳</span>
+        Sales History
+      </h1>
+      <p class="page-subtitle">View, filter, and manage all sales transactions</p>
+    </div>
+  </div>
+</section>
+
+<!-- Filters Section -->
+<section class="inventory-section">
+  <div class="inventory-container">
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.6rem;">🔍</span>
+          <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Filter Sales</h2>
+        </div>
+
+        <form method="GET" action="{{ request.path }}" style="display: grid; grid-template-columns: 1.2fr 1fr 1fr 0.8fr 0.8fr 0.8fr; gap: 16px; align-items: flex-end;">
+
+          <!-- Branch Filter -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="branch_id">
+              🏪 Branch
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏪</span>
+              <select class="form-input" id="branch_id" name="branch_id" style="padding-left: 40px; width: 100%;">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                  <option value="{{ b.branch_id }}"
+                    {% if selected_branch_id == b.branch_id %}selected{% endif %}>
+                    {{ b.branch_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <!-- Date From Filter -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="date_from">
+              📅 From
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" id="date_from" name="date_from" value="{{ date_from }}" style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <!-- Date To Filter -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="date_to">
+              📅 To
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" id="date_to" name="date_to" value="{{ date_to }}" style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <!-- Apply Button -->
+          <button type="submit" class="btn-primary" style="padding: 12px 20px; white-space: nowrap; height: fit-content;">
+            ✅ Apply
+          </button>
+
+          <!-- Reset Button -->
+          <a href="{{ url_for('sales_list') }}" class="btn-secondary" style="padding: 12px 20px; white-space: nowrap; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; height: fit-content;">
+            🔄 Reset
+          </a>
+
+          <!-- New Sale Button -->
+          <a href="{{ url_for('sales_new') }}" class="btn-primary" style="padding: 12px 20px; white-space: nowrap; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; height: fit-content;">
+            ➕ New
+          </a>
+        </form>
+
+        <!-- Filter Info Box -->
+        <div class="info-notice" style="margin-top: 20px;">
+          <span class="info-icon">ℹ️</span>
+          <div class="info-text">
+            <strong>Filters:</strong> Use branch and date filters to narrow down your search. Click "Reset" to view all sales.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Sales Table Section -->
+<section class="inventory-section" style="padding-top: 20px;">
+  <div class="inventory-container">
+    
+    {% if error %}
+      <div class="alert error" style="margin-bottom: 20px;">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if sales and sales|length > 0 %}
+      <div class="form-card" style="max-width: 100%;">
+        <div style="padding: 30px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+            <span style="font-size: 1.6rem;">📊</span>
+            <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Sales List</h2>
+            <span style="margin-left: auto; font-size: 0.95rem; color: var(--text-secondary); font-weight: 500;">{{ sales|length }} sale(s)</span>
+          </div>
+
+          <div class="table-wrapper" style="overflow-x: visible;">
+            <table class="inventory-table" style="width: 100%; table-layout: auto;">
+              <thead>
+                <tr>
+                  <th style="text-align: left; min-width: 80px;">Sale #</th>
+                  <th style="text-align: left; min-width: 160px;">Date & Time</th>
+                  <th style="text-align: left; min-width: 140px;">Branch</th>
+                  <th style="text-align: left; min-width: 150px;">Employee</th>
+                  <th style="text-align: left; min-width: 150px;">Customer</th>
+                  <th style="text-align: right; min-width: 100px;">Total</th>
+                  <th style="text-align: center; min-width: 90px;">View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for s in sales %}
+                  <tr>
+                    <td style="text-align: left;">
+                      <strong style="color: var(--primary-color); font-size: 1.05rem;">#{{ s.sale_id }}</strong>
+                    </td>
+                    <td style="text-align: left;">
+                      <span style="color: var(--text-secondary); font-weight: 500; font-size: 0.9rem;">
+                        {% if s.sale_date %}
+                          {{ s.sale_date|default('--') }}
+                        {% else %}
+                          --
+                        {% endif %}
+                      </span>
+                    </td>
+                    <td style="text-align: left;">
+                      <span style="display: inline-block; padding: 6px 10px; background: rgba(230, 126, 34, 0.1); border-radius: 6px; font-weight: 500; color: var(--primary-color); font-size: 0.9rem;">
+                        {{ s.branch_name }}
+                      </span>
+                    </td>
+                    <td style="text-align: left;">
+                      <span style="color: var(--text-primary); font-weight: 500; font-size: 0.9rem;">{{ s.employee_name }}</span>
+                    </td>
+                    <td style="text-align: left;">
+                      {% if s.customer_name %}
+                        <span style="color: var(--text-primary); font-weight: 500; font-size: 0.9rem;">{{ s.customer_name }}</span>
+                      {% else %}
+                        <span style="color: var(--text-secondary); font-style: italic; font-size: 0.9rem;">Walk-in</span>
+                      {% endif %}
+                    </td>
+                    <td style="text-align: right;">
+                      <span style="font-weight: 700; color: var(--primary-color); font-size: 1rem;">${{ "%.2f"|format(s.total_amount) }}</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <a class="btn-primary" 
+                         style="padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-block; border-radius: 6px; white-space: nowrap;"
+                         href="{{ url_for('sale_detail', sale_id=s.sale_id) }}">
+                         View
+                      </a>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sales Summary -->
+      <div class="form-card" style="max-width: 100%; margin-top: 28px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);">
+        <div style="padding: 30px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+            <div>
+              <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">Total Sales</p>
+              <h3 style="margin: 0; font-size: 1.8rem; font-weight: 700; color: var(--success-color);">{{ sales|length }}</h3>
+            </div>
+            <div>
+              <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">Total Revenue</p>
+              <h3 style="margin: 0; font-size: 1.8rem; font-weight: 700; color: var(--success-color);">
+                ${{ "%.2f"|format(sales|map(attribute='total_amount')|sum) }}
+              </h3>
+            </div>
+            <div>
+              <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">Average Sale</p>
+              <h3 style="margin: 0; font-size: 1.8rem; font-weight: 700; color: var(--success-color);">
+                {% if sales|length > 0 %}
+                  ${{ "%.2f"|format(sales|map(attribute='total_amount')|sum / sales|length) }}
+                {% else %}
+                  $0.00
+                {% endif %}
+              </h3>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    {% else %}
+      <!-- Empty State -->
+      <div class="empty-state" style="padding: 80px 40px;">
+        <div class="empty-icon" style="font-size: 4rem;">💳</div>
+        <h2 class="empty-title">No Sales Found</h2>
+        <p class="empty-text">
+          {% if date_from or date_to or selected_branch_id %}
+            Try adjusting your filters to find more sales.
+          {% else %}
+            No sales have been created yet. Start by creating a new sale.
+          {% endif %}
+        </p>
+        <a href="{{ url_for('sales_new') }}" class="btn-primary" style="margin-top: 24px; display: inline-block;">
+          ➕ Create New Sale
+        </a>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+
+{% endblock %}

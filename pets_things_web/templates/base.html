@@ -49,7 +49,25 @@
                 <li><a href="/sales" class="navbar-link {% if request.path == '/sales' %}active{% endif %}">Sales</a></li>
                 <li><a href="/purchases" class="navbar-link {% if request.path == '/purchases' %}active{% endif %}">Purchases</a></li>
                 <li><a href="/bookings" class="navbar-link {% if request.path == '/bookings' %}active{% endif %}">Bookings</a></li>
-                <li><a href="/reports" class="navbar-link {% if request.path == '/reports' %}active{% endif %}">Reports</a></li>
+                
+                <!-- Reports dropdown menu for admin/employee only -->
+                {% if session.get('role') in ['admin', 'employee'] %}
+                <li class="nav-dropdown">
+                    <a href="/reports" class="navbar-link dropdown-trigger {% if '/reports' in request.path %}active{% endif %}">
+                        Reports
+                        <span class="dropdown-arrow">&#9662;</span>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a href="/reports/top-products" class="dropdown-link">Top Products</a></li>
+                    </ul>
+                </li>
+                {% endif %}
+
+                <!-- Stock Movements link for admin/employee only -->
+                {% if session.get('role') in ['admin', 'employee'] %}
+                <li><a href="/stock-movements" class="navbar-link {% if request.path == '/stock-movements' %}active{% endif %}">Stock Movements</a></li>
+                {% endif %}
+                
                 <li><a href="/logout" class="navbar-link navbar-logout">Logout</a></li>
             </ul>
         </div>

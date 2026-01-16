@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Sale #{{ sale.sale_id }} - Pets & Things{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">🧾</span>
+        Sale #{{ sale.sale_id }}
+      </h1>
+      <p class="page-subtitle">
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+          <span>🏪</span>
+          <strong>{{ sale.branch_name }}</strong>
+        </span>
+        {% if sale.customer_name %}
+          <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">
+            <span>👤</span>
+            <strong>{{ sale.customer_name }}</strong>
+          </span>
+        {% else %}
+          <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">
+            <span>👥</span>
+            <strong>Walk-in Customer</strong>
+          </span>
+        {% endif %}
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Sale Content -->
+<section class="form-section">
+  <div class="form-container">
+
+    <!-- Flash / Error Messages -->
+    {% if error %}
+      <div class="alert error" style="margin-bottom: 20px; max-width: 1000px;">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <!-- Add Item Card -->
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.6rem;">➕</span>
+          <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Add Item to Sale</h2>
+        </div>
+
+        <form method="POST"
+              action="{{ url_for('sale_add_item', sale_id=sale.sale_id) }}"
+              style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 16px; align-items: flex-end;">
+
+          <!-- Product Selection -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="product_id">
+              <span style="color: var(--error-color);">*</span> Product
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">📦</span>
+              <select name="product_id" id="product_id" class="form-input" required style="padding-left: 40px; width: 100%;">
+                <option value="">Select a product</option>
+                {% for p in products %}
+                  <option value="{{ p.product_id }}">
+                    {{ p.product_name }} — ${{ "%.2f"|format(p.unit_price) }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <!-- Quantity Input -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="quantity">
+              <span style="color: var(--error-color);">*</span> Quantity
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🔢</span>
+              <input type="number"
+                     name="quantity"
+                     id="quantity"
+                     min="1"
+                     step="1"
+                     class="form-input"
+                     placeholder="Qty"
+                     required
+                     style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <!-- Add Button -->
+          <button type="submit" class="btn-primary" style="padding: 12px 24px; white-space: nowrap; height: fit-content;">
+            ➕ Add
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Sale Items Section -->
+    {% if lines and lines|length > 0 %}
+      <div class="form-card" style="max-width: 100%; margin-top: 28px;">
+        <div style="padding: 30px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+            <span style="font-size: 1.6rem;">📝</span>
+            <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Sale Items</h2>
+            <span style="margin-left: auto; font-size: 0.95rem; color: var(--text-secondary); font-weight: 500;">{{ lines|length }} item(s)</span>
+          </div>
+
+          <div class="table-wrapper" style="overflow-x: auto;">
+            <table class="inventory-table" style="width: 100%; min-width: 100%;">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Product</th>
+                  <th style="text-align: right;">Unit Price</th>
+                  <th style="text-align: center;">Quantity</th>
+                  <th style="text-align: right;">Line Total</th>
+                  <th style="text-align: center;">Remove</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for line in lines %}
+                  <tr>
+                    <td style="text-align: left;">
+                      <strong style="color: var(--text-primary);">{{ line.product_name }}</strong>
+                    </td>
+                    <td style="text-align: right;">
+                      <span style="color: var(--primary-color); font-weight: 600;">${{ "%.2f"|format(line.unit_price) }}</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="font-weight: 500; color: var(--text-primary);">{{ line.quantity }}</span>
+                    </td>
+                    <td style="text-align: right;">
+                      <span style="font-weight: 700; color: var(--primary-color); font-size: 1.05rem;">${{ "%.2f"|format(line.line_total) }}</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <form method="POST"
+                            action="{{ url_for('sale_remove_line', sale_id=sale.sale_id) }}"
+                            style="margin: 0; display: inline;">
+                        <input type="hidden" name="sale_line_id" value="{{ line.sale_line_id }}">
+                        <button type="submit"
+                                class="filter-btn reset-btn"
+                                style="padding: 6px 10px; font-size: 0.8rem;"
+                                onclick="return confirm('Remove this item from the sale?');">
+                          🗑️ Remove
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sale Summary Card -->
+      <div class="form-card" style="max-width: 100%; margin-top: 28px; background: linear-gradient(135deg, #fff5eb 0%, #ffe4c9 100%);">
+        <div style="padding: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px;">
+            <div>
+              <p style="font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 8px;">Sale Total</p>
+              <h2 style="margin: 0; font-size: 2.2rem; font-weight: 700; color: var(--primary-color);">
+                ${{ "%.2f"|format(computed_total) }}
+              </h2>
+            </div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; align-items: center;">
+              <form method="POST"
+                    action="{{ url_for('sale_complete', sale_id=sale.sale_id) }}"
+                    style="display: inline;">
+                <button type="submit"
+                        class="btn-primary"
+                        style="padding: 14px 28px; font-size: 1rem;"
+                        onclick="return confirm('Complete this sale? Stock will be deducted immediately.');">
+                  ✅ Complete Sale
+                </button>
+              </form>
+
+              <a href="{{ url_for('sales_new') }}" class="btn-secondary" style="padding: 14px 28px; font-size: 1rem; display: inline-flex; align-items: center; gap: 8px; text-decoration: none;">
+                ➕ New Sale
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Additional Info -->
+      <div class="info-notice" style="max-width: 100%; margin-top: 24px;">
+        <span class="info-icon">ℹ️</span>
+        <div class="info-text">
+          <strong>Summary:</strong> {{ lines|length }} item(s) totaling <strong>${{ "%.2f"|format(computed_total) }}</strong>. Review carefully before completing the sale.
+        </div>
+      </div>
+
+    {% else %}
+      <!-- Empty State -->
+      <div class="empty-state" style="max-width: 100%; padding: 60px 40px;">
+        <div class="empty-icon" style="font-size: 4rem;">🧾</div>
+        <h2 class="empty-title">No Items Added Yet</h2>
+        <p class="empty-text">Use the form above to add products to this sale.</p>
+        <a href="{{ url_for('sales_new') }}" class="btn-primary" style="margin-top: 24px; display: inline-block;">
+          ← Start New Sale
+        </a>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+
+{% endblock %}

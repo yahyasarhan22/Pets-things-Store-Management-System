@@ -592,7 +592,6 @@ def inventory():
 
 
 
-
 @app.route('/inventory/restock', methods=['POST'])
 @role_required('admin', 'employee')
 def  restock_inventory():
@@ -609,8 +608,10 @@ def  restock_inventory():
         flash("DB connection failed.", "danger")
         return redirect(url_for('inventory'))
 
+    cur = None
     try:
         cur = conn.cursor()
+        conn.start_transaction()
 
         # Add amount and update restock date
         cur.execute("""
@@ -620,6 +621,12 @@ def  restock_inventory():
             WHERE branch_id = %s AND product_id = %s
         """, (amount, branch_id, product_id))
 
+        # Check if update was successful
+        if cur.rowcount == 0:
+            conn.rollback()
+            flash("Stock row not found for this product and branch.", "danger")
+            return redirect(url_for('inventory'))
+
         conn.commit()
         flash("Stock updated successfully.", "success")
 
@@ -627,13 +634,14 @@ def  restock_inventory():
         return redirect(request.referrer or url_for('inventory'))
 
     except Error as e:
+        conn.rollback()
         print(f"Restock error: {e}")
         flash("Error updating stock.", "danger")
         return redirect(url_for('inventory'))
-
     finally:
-        if conn.is_connected():
+        if cur:
             cur.close()
+        if conn and conn.is_connected():
             conn.close()
 
 
@@ -663,6 +671,583 @@ def inject_low_stock_badge():
         if conn.is_connected():
             cur.close()
             conn.close()
+
+
+def get_low_stock_count():
+    """
+    Helper function to get low stock count.
+    """
+    conn = get_connection()
+    if not conn:
+        return 0
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT COUNT(*) AS cnt FROM stock WHERE on_hand_qty <= min_qty")
+        result = cur.fetchone()
+        return result["cnt"] if result else 0
+    except Exception as e:
+        print(f"get_low_stock_count error: {e}")
+        return 0
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
+
+
+def get_today_sales_summary():
+    """
+    Helper function to get today's sales summary.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT 
+                COUNT(*) AS total_sales,
+                SUM(total_amount) AS total_revenue
+            FROM sale
+            WHERE DATE(sale_date) = CURDATE()
+        """)
+        result = cur.fetchone()
+        return result if result else {"total_sales": 0, "total_revenue": 0}
+    except Exception as e:
+        print(f"get_today_sales_summary error: {e}")
+        return None
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
+
+
+@app.route("/sales/new", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def sales_new():
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("dashboard"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # 1) Load branches for dropdown
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        # 2) Load customers (optional)
+        # If you store customers as users with role='customer'
+        cur.execute("""
+            SELECT user_id, full_name
+            FROM users
+            WHERE role = 'customer' AND is_active = 1
+            ORDER BY full_name
+        """)
+        customers = cur.fetchall()
+
+        if request.method == "POST":
+            branch_id = request.form.get("branch_id", type=int)
+            customer_id_raw = request.form.get("customer_id", "").strip()
+            customer_id = int(customer_id_raw) if customer_id_raw else None
+
+            employee_id = session.get("user_id")  # who is doing the sale
+
+            if not branch_id:
+                flash("Please select a branch.", "warning")
+                return render_template("sales_new.html",
+                                       branches=branches,
+                                       customers=customers,
+                                       selected_branch_id=branch_id,
+                                       selected_customer_id=customer_id)
+
+            # 3) Insert sale header
+            cur2 = conn.cursor()  # normal cursor is fine for insert
+            cur2.execute("""
+                INSERT INTO sale (branch_id, employee_id, customer_id, total_amount)
+                VALUES (%s, %s, %s, 0.00)
+            """, (branch_id, employee_id, customer_id))
+            conn.commit()
+
+            sale_id = cur2.lastrowid
+            cur2.close()
+
+            flash("Sale created. Add items now.", "success")
+            return redirect(url_for("sale_detail", sale_id=sale_id))
+
+        # GET
+        return render_template("sales_new.html",
+                               branches=branches,
+                               customers=customers,
+                               selected_branch_id=None,
+                               selected_customer_id=None)
+
+    finally:
+        if cur:
+            cur.close()
+        if conn and conn.is_connected():
+            conn.close()
+        conn.close()
+
+
+@app.route("/sales/<int:sale_id>")
+@role_required("admin", "employee")
+def sale_detail(sale_id):
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("dashboard"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # 1) Get sale header
+        cur.execute("""
+            SELECT
+                s.sale_id,
+                s.branch_id,
+                b.branch_name,
+                s.sale_date,
+                s.employee_id,
+                e.full_name AS employee_name,
+                s.customer_id,
+                cu.full_name AS customer_name,
+                s.total_amount
+            FROM sale s
+            JOIN branch b ON s.branch_id = b.branch_id
+            JOIN users e ON s.employee_id = e.user_id
+            LEFT JOIN users cu ON s.customer_id = cu.user_id
+            WHERE s.sale_id = %s
+        """, (sale_id,))
+        sale = cur.fetchone()
+
+        if not sale:
+            flash("Sale not found.", "warning")
+            return redirect(url_for("sales_new"))
+
+        # 2) Products dropdown (active only)
+        cur.execute("""
+            SELECT product_id, product_name, unit_price
+            FROM product
+            WHERE is_active = 1
+            ORDER BY product_name
+        """)
+        products = cur.fetchall()
+
+        # 3) Sale lines
+        cur.execute("""
+            SELECT
+                sl.sale_line_id,
+                sl.product_id,
+                p.product_name,
+                sl.quantity,
+                sl.unit_price,
+                sl.line_total
+            FROM sale_line sl
+            JOIN product p ON sl.product_id = p.product_id
+            WHERE sl.sale_id = %s
+            ORDER BY sl.sale_line_id
+        """, (sale_id,))
+        lines = cur.fetchall()
+
+        # 4) Compute total from lines (safe)
+        total = sum(float(l["line_total"]) for l in lines) if lines else 0.0
+
+        return render_template(
+            "sale_detail.html",
+            sale=sale,
+            products=products,
+            lines=lines,
+            computed_total=total,
+            error=None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/sales/<int:sale_id>/add-item", methods=["POST"])
+@role_required("admin", "employee")
+def sale_add_item(sale_id):
+    product_id = request.form.get("product_id", type=int)
+    qty = request.form.get("quantity", type=int)
+
+    if not product_id or not qty or qty <= 0:
+        flash("Please select a product and valid quantity.", "warning")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # 1) Get product price (price at time of sale)
+        cur.execute("SELECT unit_price FROM product WHERE product_id = %s", (product_id,))
+        p = cur.fetchone()
+        if not p:
+            flash("Product not found.", "warning")
+            return redirect(url_for("sale_detail", sale_id=sale_id))
+
+        unit_price = float(p["unit_price"])
+
+        # 2) Check if this product already exists in sale_line for this sale
+        cur.execute("""
+            SELECT sale_line_id, quantity
+            FROM sale_line
+            WHERE sale_id = %s AND product_id = %s
+        """, (sale_id, product_id))
+        existing = cur.fetchone()
+
+        if existing:
+            new_qty = int(existing["quantity"]) + qty
+            new_total = new_qty * unit_price
+
+            cur.execute("""
+                UPDATE sale_line
+                SET quantity = %s,
+                    unit_price = %s,
+                    line_total = %s
+                WHERE sale_line_id = %s
+            """, (new_qty, unit_price, new_total, existing["sale_line_id"]))
+        else:
+            line_total = qty * unit_price
+            cur.execute("""
+                INSERT INTO sale_line (sale_id, product_id, quantity, unit_price, line_total)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (sale_id, product_id, qty, unit_price, line_total))
+
+        conn.commit()
+        flash("Item added.", "success")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    except Exception as e:
+        conn.rollback()
+        print("sale_add_item error:", e)
+        flash("Failed to add item.", "danger")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route("/sales/<int:sale_id>/complete", methods=["POST"])
+@role_required("admin", "employee")
+def sale_complete(sale_id):
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Start transaction
+        conn.start_transaction()
+
+        # 1) Get sale header (needs branch_id)
+        cur.execute("SELECT sale_id, branch_id FROM sale WHERE sale_id = %s", (sale_id,))
+        sale = cur.fetchone()
+        if not sale:
+            conn.rollback()
+            flash("Sale not found.", "warning")
+            return redirect(url_for("sales_new"))
+
+        branch_id = sale["branch_id"]
+
+        # 2) Get sale lines
+        cur.execute("""
+            SELECT product_id, quantity, unit_price, line_total
+            FROM sale_line
+            WHERE sale_id = %s
+        """, (sale_id,))
+        lines = cur.fetchall()
+
+        if not lines:
+            conn.rollback()
+            flash("Add at least one item before completing the sale.", "warning")
+            return redirect(url_for("sale_detail", sale_id=sale_id))
+
+        # 3) Check stock + deduct safely (lock rows)
+        for line in lines:
+            pid = line["product_id"]
+            qty = int(line["quantity"])
+
+            # Lock the stock row so two sales can't deduct at the same time
+            cur.execute("""
+                SELECT on_hand_qty
+                FROM stock
+                WHERE branch_id = %s AND product_id = %s
+                FOR UPDATE
+            """, (branch_id, pid))
+            st = cur.fetchone()
+
+            if not st:
+                conn.rollback()
+                flash(f"Stock row missing for product #{pid} in this branch.", "danger")
+                return redirect(url_for("sale_detail", sale_id=sale_id))
+
+            on_hand = int(st["on_hand_qty"])
+
+            if qty > on_hand:
+                conn.rollback()
+                flash(f"Not enough stock for product #{pid}. Available: {on_hand}.", "warning")
+                return redirect(url_for("sale_detail", sale_id=sale_id))
+
+            # Deduct
+            cur.execute("""
+                UPDATE stock
+                SET on_hand_qty = on_hand_qty - %s
+                WHERE branch_id = %s AND product_id = %s
+            """, (qty, branch_id, pid))
+
+        # 4) Update sale total from lines
+        total_amount = sum(float(str(l["line_total"])) for l in lines) if lines else 0.0
+
+        cur.execute("""
+            UPDATE sale
+            SET total_amount = %s
+            WHERE sale_id = %s
+        """, (total_amount, sale_id))
+
+        conn.commit()
+        flash("Sale completed successfully. Stock updated.", "success")
+        return redirect(url_for("sales_list"))
+
+    except Exception as e:
+        conn.rollback()
+        print("sale_complete error:", e)
+        flash("Failed to complete sale.", "danger")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+    finally:
+        if cur:
+            cur.close()
+        if conn and conn.is_connected():
+            conn.close()
+
+@app.route("/sales")
+@role_required("admin", "employee")
+def sales_list():
+    conn = get_connection()
+    if not conn:
+        return render_template("sales.html", sales=[], branches=[], error="Unable to connect to database")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Filters
+        branch_id = request.args.get("branch_id", type=int)
+        date_from = (request.args.get("date_from") or "").strip()   # "YYYY-MM-DD"
+        date_to = (request.args.get("date_to") or "").strip()       # "YYYY-MM-DD"
+
+        # Dropdown branches
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        # Build dynamic WHERE
+        conditions = []
+        params = []
+
+        if branch_id:
+            conditions.append("s.branch_id = %s")
+            params.append(branch_id)
+
+        if date_from:
+            conditions.append("DATE(s.sale_date) >= %s")
+            params.append(date_from)
+
+        if date_to:
+            conditions.append("DATE(s.sale_date) <= %s")
+            params.append(date_to)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Main query
+        cur.execute(f"""
+            SELECT
+                s.sale_id,
+                s.sale_date,
+                b.branch_name,
+                e.full_name AS employee_name,
+                cu.full_name AS customer_name,
+                s.total_amount
+            FROM sale s
+            JOIN branch b ON s.branch_id = b.branch_id
+            JOIN users e ON s.employee_id = e.user_id
+            LEFT JOIN users cu ON s.customer_id = cu.user_id
+            {where_clause}
+            ORDER BY s.sale_date DESC
+        """, params)
+
+        sales = cur.fetchall()
+
+        return render_template(
+            "sales.html",
+            sales=sales,
+            branches=branches,
+            selected_branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+            error=None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route("/sales/<int:sale_id>/remove-line", methods=["POST"])
+@role_required("admin", "employee")
+def sale_remove_line(sale_id):
+    sale_line_id = request.form.get("sale_line_id", type=int)
+
+    if not sale_line_id:
+        flash("Invalid line item.", "warning")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("sale_detail", sale_id=sale_id))
+
+    try:
+        cur = conn.cursor()
+
+        # Make sure the line belongs to this sale (prevents deleting other sales lines)
+        cur.execute("""
+            DELETE FROM sale_line
+            WHERE sale_line_id = %s AND sale_id = %s
+        """, (sale_line_id, sale_id))
+
+        conn.commit()
+
+        if cur.rowcount == 0:
+            flash("Line not found (or already removed).", "warning")
+        else:
+            flash("Item removed from sale.", "success")
+
+    except Exception as e:
+        conn.rollback()
+        print("sale_remove_line error:", e)
+        flash("Failed to remove item.", "danger")
+
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for("sale_detail", sale_id=sale_id))
+
+
+@app.context_processor
+def inject_dashboard_metrics():
+    data = {"nav_low_stock_count": None, "today_sales": None}
+
+    if 'user_id' in session and session.get('role') in ('admin', 'employee'):
+        data["nav_low_stock_count"] = get_low_stock_count()
+        data["today_sales"] = get_today_sales_summary()
+
+    return data
+
+@app.route("/reports/top-products")
+@role_required("admin", "employee")
+def report_top_products():
+    conn = get_connection()
+    if not conn:
+        return render_template("report_top_products.html",
+                               rows=[],
+                               branches=[],
+                               error="Unable to connect to database")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Filters
+        branch_id = request.args.get("branch_id", type=int)
+        date_from = (request.args.get("date_from") or "").strip()   # YYYY-MM-DD
+        date_to = (request.args.get("date_to") or "").strip()       # YYYY-MM-DD
+
+        metric = (request.args.get("metric") or "qty").strip().lower()   # qty | revenue
+        metric = metric if metric in ("qty", "revenue") else "qty"
+
+        top_n = request.args.get("top", default=10, type=int)
+        if top_n not in (5, 10, 20, 50):
+            top_n = 10
+
+        # Branch dropdown
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        # Build WHERE
+        conditions = []
+        params = []
+
+        if branch_id:
+            conditions.append("s.branch_id = %s")
+            params.append(branch_id)
+
+        if date_from:
+            conditions.append("DATE(s.sale_date) >= %s")
+            params.append(date_from)
+
+        if date_to:
+            conditions.append("DATE(s.sale_date) <= %s")
+            params.append(date_to)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Order by chosen metric
+        order_sql = "total_qty DESC" if metric == "qty" else "total_revenue DESC"
+
+        query = f"""
+            SELECT
+                p.product_id,
+                p.product_name,
+                c.category_name,
+                SUM(sl.quantity) AS total_qty,
+                SUM(sl.line_total) AS total_revenue
+            FROM sale_line sl
+            JOIN sale s      ON sl.sale_id = s.sale_id
+            JOIN product p   ON sl.product_id = p.product_id
+            JOIN category c  ON p.category_id = c.category_id
+            {where_clause}
+            GROUP BY p.product_id, p.product_name, c.category_name
+            ORDER BY {order_sql}
+            LIMIT %s
+        """
+
+        cur.execute(query, params + [top_n])
+        rows = cur.fetchall()
+
+        return render_template(
+            "report_top_products.html",
+            rows=rows,
+            branches=branches,
+            selected_branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+            metric=metric,
+            top=top_n,
+            error=None
+        )
+
+    except Exception as e:
+        print("Top products report error:", e)
+        return render_template("report_top_products.html",
+                               rows=[],
+                               branches=[],
+                               error="Error loading report")
+    finally:
+        cur.close()
+        conn.close()
 
 
 
