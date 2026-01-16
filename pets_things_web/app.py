@@ -594,7 +594,7 @@ def inventory():
 
 @app.route('/inventory/restock', methods=['POST'])
 @role_required('admin', 'employee')
-def  restock_inventory():
+def restock_inventory():
     branch_id = request.form.get('branch_id', type=int)
     product_id = request.form.get('product_id', type=int)
     amount = request.form.get('restock_qty', type=int)
@@ -610,10 +610,12 @@ def  restock_inventory():
 
     cur = None
     try:
+        performed_by = session.get("user_id")  # who restocked (admin/employee)
+
         cur = conn.cursor()
         conn.start_transaction()
 
-        # Add amount and update restock date
+        # 1) Update stock
         cur.execute("""
             UPDATE stock
             SET on_hand_qty = on_hand_qty + %s,
@@ -621,16 +623,22 @@ def  restock_inventory():
             WHERE branch_id = %s AND product_id = %s
         """, (amount, branch_id, product_id))
 
-        # Check if update was successful
+        # If no row updated, do not log anything
         if cur.rowcount == 0:
             conn.rollback()
             flash("Stock row not found for this product and branch.", "danger")
             return redirect(url_for('inventory'))
 
+        # 2) Log movement (RESTOCK) ✅
+        cur.execute("""
+            INSERT INTO stock_movement
+                (branch_id, product_id, change_qty, movement_type, reference_sale_id, performed_by)
+            VALUES
+                (%s, %s, %s, 'RESTOCK', NULL, %s)
+        """, (branch_id, product_id, amount, performed_by))
+
         conn.commit()
         flash("Stock updated successfully.", "success")
-
-        # Redirect back to inventory and keep current filters if possible
         return redirect(request.referrer or url_for('inventory'))
 
     except Error as e:
@@ -638,6 +646,7 @@ def  restock_inventory():
         print(f"Restock error: {e}")
         flash("Error updating stock.", "danger")
         return redirect(url_for('inventory'))
+
     finally:
         if cur:
             cur.close()
@@ -946,12 +955,12 @@ def sale_complete(sale_id):
 
     cur = None
     try:
-        cur = conn.cursor(dictionary=True)
+        performed_by = session.get("user_id")  # who completed the sale
 
-        # Start transaction
+        cur = conn.cursor(dictionary=True)
         conn.start_transaction()
 
-        # 1) Get sale header (needs branch_id)
+        # 1) Get sale header (branch_id needed because stock is per branch)
         cur.execute("SELECT sale_id, branch_id FROM sale WHERE sale_id = %s", (sale_id,))
         sale = cur.fetchone()
         if not sale:
@@ -963,7 +972,7 @@ def sale_complete(sale_id):
 
         # 2) Get sale lines
         cur.execute("""
-            SELECT product_id, quantity, unit_price, line_total
+            SELECT product_id, quantity, line_total
             FROM sale_line
             WHERE sale_id = %s
         """, (sale_id,))
@@ -974,12 +983,12 @@ def sale_complete(sale_id):
             flash("Add at least one item before completing the sale.", "warning")
             return redirect(url_for("sale_detail", sale_id=sale_id))
 
-        # 3) Check stock + deduct safely (lock rows)
+        # 3) Check stock + deduct safely
         for line in lines:
             pid = line["product_id"]
             qty = int(line["quantity"])
 
-            # Lock the stock row so two sales can't deduct at the same time
+            # Lock stock row to avoid race conditions
             cur.execute("""
                 SELECT on_hand_qty
                 FROM stock
@@ -994,22 +1003,28 @@ def sale_complete(sale_id):
                 return redirect(url_for("sale_detail", sale_id=sale_id))
 
             on_hand = int(st["on_hand_qty"])
-
             if qty > on_hand:
                 conn.rollback()
                 flash(f"Not enough stock for product #{pid}. Available: {on_hand}.", "warning")
                 return redirect(url_for("sale_detail", sale_id=sale_id))
 
-            # Deduct
+            # Deduct stock
             cur.execute("""
                 UPDATE stock
                 SET on_hand_qty = on_hand_qty - %s
                 WHERE branch_id = %s AND product_id = %s
             """, (qty, branch_id, pid))
 
-        # 4) Update sale total from lines
-        total_amount = sum(float(str(l["line_total"])) for l in lines) if lines else 0.0
+            # 4) Log movement (SALE) ✅ (negative quantity)
+            cur.execute("""
+                INSERT INTO stock_movement
+                    (branch_id, product_id, change_qty, movement_type, reference_sale_id, performed_by)
+                VALUES
+                    (%s, %s, %s, 'SALE', %s, %s)
+            """, (branch_id, pid, -qty, sale_id, performed_by))
 
+        # 5) Update sale total
+        total_amount = sum(float(str(l["line_total"])) for l in lines) if lines else 0.0
         cur.execute("""
             UPDATE sale
             SET total_amount = %s
@@ -1025,11 +1040,13 @@ def sale_complete(sale_id):
         print("sale_complete error:", e)
         flash("Failed to complete sale.", "danger")
         return redirect(url_for("sale_detail", sale_id=sale_id))
+
     finally:
         if cur:
             cur.close()
         if conn and conn.is_connected():
             conn.close()
+
 
 @app.route("/sales")
 @role_required("admin", "employee")
@@ -1249,6 +1266,121 @@ def report_top_products():
         cur.close()
         conn.close()
 
+@app.route("/stock-movements")
+@role_required("admin", "employee")
+def stock_movements():
+    conn = get_connection()
+    if not conn:
+        return render_template(
+            "stock_movements.html",
+            rows=[],
+            branches=[],
+            products=[],
+            selected_branch_id=None,
+            selected_product_id=None,
+            selected_type="",
+            date_from="",
+            date_to="",
+            error="Unable to connect to database"
+        )
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Filters
+        branch_id = request.args.get("branch_id", type=int)
+        product_id = request.args.get("product_id", type=int)
+        mtype = (request.args.get("type") or "").strip().upper()  # RESTOCK / SALE / ""
+        date_from = (request.args.get("date_from") or "").strip() # YYYY-MM-DD
+        date_to = (request.args.get("date_to") or "").strip()     # YYYY-MM-DD
+
+        # Dropdowns
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        cur.execute("SELECT product_id, product_name FROM product ORDER BY product_name")
+        products = cur.fetchall()
+
+        # Dynamic WHERE
+        conditions = []
+        params = []
+
+        if branch_id:
+            conditions.append("sm.branch_id = %s")
+            params.append(branch_id)
+
+        if product_id:
+            conditions.append("sm.product_id = %s")
+            params.append(product_id)
+
+        if mtype in ("RESTOCK", "SALE"):
+            conditions.append("sm.movement_type = %s")
+            params.append(mtype)
+
+        if date_from:
+            conditions.append("DATE(sm.movement_date) >= %s")
+            params.append(date_from)
+
+        if date_to:
+            conditions.append("DATE(sm.movement_date) <= %s")
+            params.append(date_to)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Main query
+        query = f"""
+            SELECT
+                sm.movement_id,
+                sm.movement_date,
+                sm.movement_type,
+                b.branch_name,
+                p.product_name,
+                sm.change_qty,
+                sm.reference_sale_id,
+                u.full_name AS performed_by_name
+            FROM stock_movement sm
+            JOIN branch b  ON sm.branch_id = b.branch_id
+            JOIN product p ON sm.product_id = p.product_id
+            JOIN users u   ON sm.performed_by = u.user_id
+            {where_clause}
+            ORDER BY sm.movement_date DESC
+        """
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        return render_template(
+            "stock_movements.html",
+            rows=rows,
+            branches=branches,
+            products=products,
+            selected_branch_id=branch_id,
+            selected_product_id=product_id,
+            selected_type=mtype,
+            date_from=date_from,
+            date_to=date_to,
+            error=None
+        )
+
+    except Exception as e:
+        print("stock_movements error:", e)
+        return render_template(
+            "stock_movements.html",
+            rows=[],
+            branches=[],
+            products=[],
+            selected_branch_id=None,
+            selected_product_id=None,
+            selected_type="",
+            date_from="",
+            date_to="",
+            error="Error loading stock movements"
+        )
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 
