@@ -1,4 +1,4 @@
-from binascii import Error
+from mysql.connector import Error
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
@@ -54,73 +54,617 @@ from db import get_connection
 
 @app.route('/products')
 def products():
-    """Display all products with category information"""
     conn = get_connection()
-    
     if not conn:
-        return render_template('products.html', 
-                             products=[], 
-                             error="Unable to connect to database")
-    
+        return render_template(
+            'products.html',
+            products=[],
+            categories=[],
+            selected_category_id=None,
+            min_price=None,
+            max_price=None,
+            search="",
+            error="Unable to connect to database",
+            page_title="All Products"
+        )
+
     try:
         cursor = conn.cursor(dictionary=True)
-        
-        query = """
+
+        # 1) Read filters from URL
+        category_id = request.args.get('category_id', type=int)
+        min_price = request.args.get('min_price', type=float)
+        max_price = request.args.get('max_price', type=float)
+        search = (request.args.get('search') or "").strip()
+
+        # 2) Categories for dropdown
+        cursor.execute("""
+            SELECT category_id, category_name
+            FROM category
+            ORDER BY category_name ASC
+        """)
+        categories = cursor.fetchall()
+
+        # 3) Base query
+        sql = """
             SELECT 
                 p.product_id,
                 p.product_name,
                 c.category_name,
                 p.unit_price,
                 p.description,
-                p.is_active
+                p.is_active,
+                p.category_id
             FROM product p
             INNER JOIN category c ON p.category_id = c.category_id
-            ORDER BY p.product_name ASC
         """
-        
-        cursor.execute(query)
-        products = cursor.fetchall()
-        
-        return render_template('products.html', products=products, error=None)
-        
-    except Error as e:
-        print(f"Database query error: {e}")
-        return render_template('products.html', 
-                             products=[], 
-                             error="Error retrieving products")
-    finally:
-        if conn.is_connected():
-            cursor.close()
-            conn.close()
 
-@app.route("/products/active")
+        # 4) Dynamic conditions
+        conditions = []
+        params = []
+
+        if category_id:
+            conditions.append("p.category_id = %s")
+            params.append(category_id)
+
+        if min_price is not None:
+            conditions.append("p.unit_price >= %s")
+            params.append(min_price)
+
+        if max_price is not None:
+            conditions.append("p.unit_price <= %s")
+            params.append(max_price)
+
+        if search:
+            conditions.append("p.product_name LIKE %s")
+            params.append(f"%{search}%")
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        sql += " ORDER BY p.product_name ASC"
+
+        cursor.execute(sql, params)
+        products = cursor.fetchall()
+
+        return render_template(
+            'products.html',
+            products=products,
+            categories=categories,
+            selected_category_id=category_id,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
+            error=None,
+            page_title="All Products"
+        )
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+
+@app.route('/products/active')
 def active_products():
     conn = get_connection()
-    cur = conn.cursor(dictionary=True)
+    if not conn:
+        return render_template(
+            'products.html',
+            products=[],
+            categories=[],
+            selected_category_id=None,
+            min_price=None,
+            max_price=None,
+            search="",
+            error="Unable to connect to database",
+            page_title="Active Products"
+        )
 
-    cur.execute("""
-        SELECT 
-            p.product_id,
-            p.product_name,
-            c.category_name,
-            p.unit_price,
-            p.description,
-            p.is_active
-        FROM product p
-        INNER JOIN category c ON p.category_id = c.category_id
-        WHERE p.is_active = 1
-        ORDER BY p.product_name ASC
-    """)
+    try:
+        cursor = conn.cursor(dictionary=True)
 
-    products = cur.fetchall()
-    cur.close()
-    conn.close()
+        category_id = request.args.get('category_id', type=int)
+        min_price = request.args.get('min_price', type=float)
+        max_price = request.args.get('max_price', type=float)
+        search = (request.args.get('search') or "").strip()
 
-    # We pass a custom title so the same template can display a different heading
-    return render_template("products.html",
-                           products=products,
-                           error=None,
-                           page_title="Active Products")
+        cursor.execute("""
+            SELECT category_id, category_name
+            FROM category
+            ORDER BY category_name ASC
+        """)
+        categories = cursor.fetchall()
+
+        sql = """
+            SELECT 
+                p.product_id,
+                p.product_name,
+                c.category_name,
+                p.unit_price,
+                p.description,
+                p.is_active,
+                p.category_id
+            FROM product p
+            INNER JOIN category c ON p.category_id = c.category_id
+            WHERE p.is_active = 1
+        """
+
+        params = []
+
+        if category_id:
+            sql += " AND p.category_id = %s"
+            params.append(category_id)
+
+        if min_price is not None:
+            sql += " AND p.unit_price >= %s"
+            params.append(min_price)
+
+        if max_price is not None:
+            sql += " AND p.unit_price <= %s"
+            params.append(max_price)
+
+        if search:
+            sql += " AND p.product_name LIKE %s"
+            params.append(f"%{search}%")
+
+        sql += " ORDER BY p.product_name ASC"
+
+        cursor.execute(sql, params)
+        products = cursor.fetchall()
+
+        return render_template(
+            'products.html',
+            products=products,
+            categories=categories,
+            selected_category_id=category_id,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
+            error=None,
+            page_title="Active Products"
+        )
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+######################
+@app.route("/products/add", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def add_product():
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("products"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # categories for dropdown
+        cur.execute("SELECT category_id, category_name FROM category ORDER BY category_name")
+        categories = cur.fetchall()
+
+        if request.method == "POST":
+            name = (request.form.get("product_name") or "").strip()
+            category_id = request.form.get("category_id", type=int)
+            unit_price = request.form.get("unit_price", type=float)
+            description = (request.form.get("description") or "").strip()
+            is_active = 1 if request.form.get("is_active") == "1" else 0
+
+            # basic validation
+            if not name or not category_id or unit_price is None:
+                flash("Please fill name, category, and price.", "warning")
+                return render_template("product_form.html",
+                                       mode="add",
+                                       categories=categories,
+                                       product=None)
+
+            cur.execute("""
+                INSERT INTO product (product_name, category_id, unit_price, description, is_active)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (name, category_id, unit_price, description, is_active))
+            conn.commit()
+
+            flash("Product added successfully.", "success")
+            return redirect(url_for("products"))
+
+        return render_template("product_form.html",
+                               mode="add",
+                               categories=categories,
+                               product=None)
+
+    finally:
+        cur.close()
+        conn.close()
+##########################
+@app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def edit_product(product_id):
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("products"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # get product
+        cur.execute("SELECT * FROM product WHERE product_id = %s", (product_id,))
+        product = cur.fetchone()
+        if not product:
+            flash("Product not found.", "warning")
+            return redirect(url_for("products"))
+
+        # categories
+        cur.execute("SELECT category_id, category_name FROM category ORDER BY category_name")
+        categories = cur.fetchall()
+
+        if request.method == "POST":
+            name = (request.form.get("product_name") or "").strip()
+            category_id = request.form.get("category_id", type=int)
+            unit_price = request.form.get("unit_price", type=float)
+            description = (request.form.get("description") or "").strip()
+            is_active = 1 if request.form.get("is_active") == "1" else 0
+
+            if not name or not category_id or unit_price is None:
+                flash("Please fill name, category, and price.", "warning")
+                return render_template("product_form.html",
+                                       mode="edit",
+                                       categories=categories,
+                                       product=product)
+
+            cur.execute("""
+                UPDATE product
+                SET product_name = %s,
+                    category_id = %s,
+                    unit_price = %s,
+                    description = %s,
+                    is_active = %s
+                WHERE product_id = %s
+            """, (name, category_id, unit_price, description, is_active, product_id))
+            conn.commit()
+
+            flash("Product updated successfully.", "success")
+            return redirect(url_for("products"))
+
+        return render_template("product_form.html",
+                               mode="edit",
+                               categories=categories,
+                               product=product)
+
+    finally:
+        cur.close()
+        conn.close()
+############
+@app.route("/products/<int:product_id>/delete", methods=["POST"])
+@role_required("admin", "employee")
+def delete_product(product_id):
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("products"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("DELETE FROM product WHERE product_id = %s", (product_id,))
+        conn.commit()
+
+        flash("Product deleted successfully.", "success")
+        return redirect(url_for("products"))
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+@app.route('/inventory')
+@role_required('admin', 'employee')
+def inventory():
+    conn = get_connection()
+    if not conn:
+        return render_template(
+            'inventory.html',
+            inventory=[],
+            branches=[],
+            categories=[],
+            selected_branch_id=None,
+            selected_category_id=None,
+            selected_status="",
+            sort="branch_name",
+            dir="asc",
+            page=1,
+            total_pages=1,
+            total_records=0,
+            summary={
+                "total_rows": 0,
+                "low_count": 0,
+                "ok_count": 0,
+                "out_of_stock": 0,
+                "unique_products": 0,
+                "unique_branches": 0
+            },
+            error="Unable to connect to database"
+        )
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # ----------------------------
+        # 1) Read filters from query string
+        # ----------------------------
+        branch_id = request.args.get('branch_id', type=int)
+        category_id = request.args.get('category_id', type=int)
+        status = (request.args.get('status') or "").strip().upper()  # "LOW" / "OK" / ""
+
+        # ----------------------------
+        # 2) Sorting + pagination inputs
+        # ----------------------------
+        sort = (request.args.get('sort') or "branch_name").strip()
+        direction = (request.args.get('dir') or "asc").strip().lower()
+        direction = "desc" if direction == "desc" else "asc"
+
+        page = request.args.get('page', default=1, type=int)
+        if page < 1:
+            page = 1
+
+        per_page = 15
+        offset = (page - 1) * per_page
+
+        # ----------------------------
+        # 3) Data for dropdowns
+        # ----------------------------
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        cur.execute("SELECT category_id, category_name FROM category ORDER BY category_name")
+        categories = cur.fetchall()
+
+        # ----------------------------
+        # 4) Build WHERE conditions dynamically
+        # ----------------------------
+        conditions = []
+        params = []
+
+        if branch_id:
+            conditions.append("s.branch_id = %s")
+            params.append(branch_id)
+
+        if category_id:
+            conditions.append("p.category_id = %s")
+            params.append(category_id)
+
+        # status filter: LOW means on_hand <= min, OK means on_hand > min
+        if status == "LOW":
+            conditions.append("s.on_hand_qty <= s.min_qty")
+        elif status == "OK":
+            conditions.append("s.on_hand_qty > s.min_qty")
+
+        where_clause = ""
+        if conditions:
+            where_clause = " WHERE " + " AND ".join(conditions)
+
+        # ----------------------------
+        # 5) Whitelist sorting (prevents SQL injection)
+        # ----------------------------
+        sort_map = {
+            "branch_name": "b.branch_name",
+            "product_name": "p.product_name",
+            "category_name": "c.category_name",
+            "on_hand_qty": "s.on_hand_qty",
+            "min_qty": "s.min_qty",
+            "last_restock_date": "s.last_restock_date",
+            "status": "stock_status"
+        }
+        sort_sql = sort_map.get(sort, "b.branch_name")
+
+        # ----------------------------
+        # 6) Total records (for pagination)
+        # ----------------------------
+        count_query = f"""
+            SELECT COUNT(*) AS total
+            FROM stock s
+            JOIN product p  ON s.product_id = p.product_id
+            JOIN category c ON p.category_id = c.category_id
+            JOIN branch b   ON s.branch_id = b.branch_id
+            {where_clause}
+        """
+        cur.execute(count_query, params)
+        total_records = cur.fetchone()["total"]
+        total_pages = max(1, (total_records + per_page - 1) // per_page)
+
+        # If page is too big, clamp and recompute offset
+        if page > total_pages:
+            page = total_pages
+            offset = (page - 1) * per_page
+
+        # ----------------------------
+        # 7) Main SELECT (table rows)
+        # ----------------------------
+        base_select = f"""
+            SELECT
+                s.branch_id,
+                s.product_id,
+                b.branch_name,
+                p.product_name,
+                c.category_name,
+                s.on_hand_qty,
+                s.min_qty,
+                s.last_restock_date,
+                CASE
+                    WHEN s.on_hand_qty <= s.min_qty THEN 'LOW'
+                    ELSE 'OK'
+                END AS stock_status
+            FROM stock s
+            JOIN product p  ON s.product_id = p.product_id
+            JOIN category c ON p.category_id = c.category_id
+            JOIN branch b   ON s.branch_id = b.branch_id
+            {where_clause}
+            ORDER BY {sort_sql} {direction}
+            LIMIT %s OFFSET %s
+        """
+        cur.execute(base_select, params + [per_page, offset])
+        rows = cur.fetchall()
+
+        # ----------------------------
+        # 8) Summary cards (FILTERED – matches current view)
+        # ----------------------------
+        summary_query = f"""
+            SELECT
+                COUNT(*) AS total_rows,
+                SUM(CASE WHEN s.on_hand_qty <= s.min_qty THEN 1 ELSE 0 END) AS low_count,
+                SUM(CASE WHEN s.on_hand_qty >  s.min_qty THEN 1 ELSE 0 END) AS ok_count,
+                SUM(CASE WHEN s.on_hand_qty = 0 THEN 1 ELSE 0 END) AS out_of_stock,
+                COUNT(DISTINCT s.product_id) AS unique_products,
+                COUNT(DISTINCT s.branch_id) AS unique_branches
+            FROM stock s
+            JOIN product p  ON s.product_id = p.product_id
+            JOIN category c ON p.category_id = c.category_id
+            JOIN branch b   ON s.branch_id = b.branch_id
+            {where_clause}
+        """
+        cur.execute(summary_query, params)
+        summary = cur.fetchone() or {
+            "total_rows": 0,
+            "low_count": 0,
+            "ok_count": 0,
+            "out_of_stock": 0,
+            "unique_products": 0,
+            "unique_branches": 0
+        }
+
+        # MySQL SUM can return None when there are no rows
+        for k in ["low_count", "ok_count", "out_of_stock"]:
+            summary[k] = summary[k] or 0
+
+        return render_template(
+            'inventory.html',
+            inventory=rows,
+            branches=branches,
+            categories=categories,
+            selected_branch_id=branch_id,
+            selected_category_id=category_id,
+            selected_status=status,
+            sort=sort,
+            dir=direction,
+            page=page,
+            total_pages=total_pages,
+            total_records=total_records,
+            summary=summary,
+            error=None
+        )
+
+    except Exception as e:
+        print(f"Inventory query error: {e}")
+        return render_template(
+            'inventory.html',
+            inventory=[],
+            branches=[],
+            categories=[],
+            selected_branch_id=None,
+            selected_category_id=None,
+            selected_status="",
+            sort="branch_name",
+            dir="asc",
+            page=1,
+            total_pages=1,
+            total_records=0,
+            summary={
+                "total_rows": 0,
+                "low_count": 0,
+                "ok_count": 0,
+                "out_of_stock": 0,
+                "unique_products": 0,
+                "unique_branches": 0
+            },
+            error="Error loading inventory"
+        )
+    finally:
+        if conn and conn.is_connected():
+            cur.close()
+            conn.close()
+
+
+
+
+
+@app.route('/inventory/restock', methods=['POST'])
+@role_required('admin', 'employee')
+def  restock_inventory():
+    branch_id = request.form.get('branch_id', type=int)
+    product_id = request.form.get('product_id', type=int)
+    amount = request.form.get('restock_qty', type=int)
+
+    if not branch_id or not product_id or not amount or amount < 1:
+        flash("Invalid restock request.", "danger")
+        return redirect(url_for('inventory'))
+
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for('inventory'))
+
+    try:
+        cur = conn.cursor()
+
+        # Add amount and update restock date
+        cur.execute("""
+            UPDATE stock
+            SET on_hand_qty = on_hand_qty + %s,
+                last_restock_date = NOW()
+            WHERE branch_id = %s AND product_id = %s
+        """, (amount, branch_id, product_id))
+
+        conn.commit()
+        flash("Stock updated successfully.", "success")
+
+        # Redirect back to inventory and keep current filters if possible
+        return redirect(request.referrer or url_for('inventory'))
+
+    except Error as e:
+        print(f"Restock error: {e}")
+        flash("Error updating stock.", "danger")
+        return redirect(url_for('inventory'))
+
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
+
+
+
+@app.context_processor
+def inject_low_stock_badge():
+    """
+    Makes low_stock_count available in ALL templates.
+    Only computed for admin/employee.
+    """
+    if session.get("role") not in ("admin", "employee"):
+        return {"low_stock_count": None}
+
+    conn = get_connection()
+    if not conn:
+        return {"low_stock_count": None}
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT COUNT(*) AS cnt FROM stock WHERE on_hand_qty <= min_qty")
+        low_stock_count = cur.fetchone()["cnt"]
+        return {"low_stock_count": low_stock_count}
+    except Error as e:
+        print(f"Low stock badge error: {e}")
+        return {"low_stock_count": None}
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
+
+
 
 
 
@@ -172,6 +716,61 @@ def login():
         return redirect(url_for('dashboard'))
     
     return render_template('login.html')
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    """
+    Handle user signup (registration).
+    Only allows customer role registrations via web form.
+    """
+    # Redirect if already logged in
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    
+    # Extract form data
+    full_name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip()
+    password = request.form.get('password', '').strip()
+    confirm_password = request.form.get('confirm_password', '').strip()
+    
+    # Validation
+    if not full_name or not email or not password or not confirm_password:
+        flash('Please fill in all fields.', 'danger')
+        return render_template('login.html')
+    
+    # Validate email format
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        flash('Please enter a valid email address.', 'danger')
+        return render_template('login.html')
+    
+    # Validate password length
+    if len(password) < 8:
+        flash('Password must be at least 8 characters long.', 'danger')
+        return render_template('login.html')
+    
+    # Check if passwords match
+    if password != confirm_password:
+        flash('Passwords do not match.', 'danger')
+        return render_template('login.html')
+    
+    # Check if email already exists
+    if email_exists(email):
+        flash('An account with this email already exists. Please log in or use a different email.', 'danger')
+        return render_template('login.html')
+    
+    # Hash password
+    password_hash = generate_password_hash(password)
+    
+    # Create user with customer role
+    success = create_user(full_name, email, password_hash, role='customer')
+    
+    if success:
+        flash('Account created successfully! Please log in with your credentials.', 'success')
+        return render_template('login.html')
+    else:
+        flash('An error occurred while creating your account. Please try again.', 'danger')
+        return render_template('login.html')
 
 @app.route('/logout')
 def logout():

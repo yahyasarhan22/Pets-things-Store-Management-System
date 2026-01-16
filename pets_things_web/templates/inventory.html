@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory - Pets & Things{% endblock %}
+
+{% block content %}
+
+{# -----------------------------
+   NEW: helper to toggle sorting direction
+   ----------------------------- #}
+{% macro next_dir(col) -%}
+  {{ 'desc' if (sort == col and dir == 'asc') else 'asc' }}
+{%- endmacro %}
+
+<!-- Inventory Summary Cards -->
+{% if summary %}
+<section class="inventory-summary-section">
+  <div class="inventory-summary-cards">
+    <div class="inv-card">
+      <div class="inv-card-icon">📦</div>
+      <div class="inv-card-content">
+        <div class="inv-card-label">Total Items</div>
+        <div class="inv-card-value">{{ summary.total_rows }}</div>
+      </div>
+    </div>
+
+    <div class="inv-card">
+      <div class="inv-card-icon">⚠️</div>
+      <div class="inv-card-content">
+        <div class="inv-card-label">LOW Stock</div>
+        <div class="inv-card-value">{{ summary.low_count }}</div>
+      </div>
+    </div>
+
+    <div class="inv-card">
+      <div class="inv-card-icon">🚫</div>
+      <div class="inv-card-content">
+        <div class="inv-card-label">Out of Stock</div>
+        <div class="inv-card-value">{{ summary.out_of_stock }}</div>
+      </div>
+    </div>
+
+    <div class="inv-card">
+      <div class="inv-card-icon">🏪</div>
+      <div class="inv-card-content">
+        <div class="inv-card-label">Branches</div>
+        <div class="inv-card-value">{{ summary.unique_branches }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">📦</span>
+        Inventory
+      </h1>
+      <p class="page-subtitle">Monitor stock levels across all branches</p>
+    </div>
+
+    <!-- Filters -->
+    <div class="header-actions">
+      <form method="GET" action="{{ request.path }}" class="filter-form">
+        <!-- Branch Filter -->
+        <div class="filter-group">
+          <label for="branch_id" class="filter-label">Branch</label>
+          <select name="branch_id" id="branch_id" class="filter-select">
+            <option value="">All Branches</option>
+            {% for b in branches %}
+              <option value="{{ b.branch_id }}"
+                {% if selected_branch_id == b.branch_id %}selected{% endif %}>
+                {{ b.branch_name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Category Filter -->
+        <div class="filter-group">
+          <label for="category_id" class="filter-label">Category</label>
+          <select name="category_id" id="category_id" class="filter-select">
+            <option value="">All Categories</option>
+            {% for c in categories %}
+              <option value="{{ c.category_id }}"
+                {% if selected_category_id == c.category_id %}selected{% endif %}>
+                {{ c.category_name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Status Filter -->
+        <div class="filter-group">
+          <label for="status" class="filter-label">Status</label>
+          <select name="status" id="status" class="filter-select">
+            <option value="">All Status</option>
+            <option value="LOW" {% if selected_status == "LOW" %}selected{% endif %}>LOW</option>
+            <option value="OK" {% if selected_status == "OK" %}selected{% endif %}>OK</option>
+          </select>
+        </div>
+
+        <!-- Buttons -->
+        <div class="filter-buttons">
+          <button type="submit" class="filter-btn apply-btn">Apply</button>
+          <a href="{{ url_for('inventory') }}" class="filter-btn reset-btn">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Inventory Section -->
+<section class="inventory-section">
+  <div class="inventory-container">
+
+    <!-- Error Alert -->
+    {% if error %}
+      <div class="alert error">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if inventory and inventory|length > 0 %}
+      <!-- Inventory Table Card -->
+      <div class="table-card">
+        <div class="table-wrapper">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+
+                {# --------- NEW: Sortable headers (preserve filters + toggle dir) --------- #}
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='branch_name',
+                                      dir=next_dir('branch_name'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">🏪</span>
+                      Branch
+                      {% if sort == 'branch_name' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='product_name',
+                                      dir=next_dir('product_name'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">🦴</span>
+                      Product Name
+                      {% if sort == 'product_name' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='category_name',
+                                      dir=next_dir('category_name'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">📁</span>
+                      Category
+                      {% if sort == 'category_name' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='on_hand_qty',
+                                      dir=next_dir('on_hand_qty'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">📊</span>
+                      On Hand
+                      {% if sort == 'on_hand_qty' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='min_qty',
+                                      dir=next_dir('min_qty'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">⚠️</span>
+                      Min Qty
+                      {% if sort == 'min_qty' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='status',
+                                      dir=next_dir('status'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">🔔</span>
+                      Status
+                      {% if sort == 'status' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <th>
+                  <a class="sort-link"
+                     href="{{ url_for('inventory',
+                                      branch_id=selected_branch_id,
+                                      category_id=selected_category_id,
+                                      status=selected_status,
+                                      sort='last_restock_date',
+                                      dir=next_dir('last_restock_date'),
+                                      page=1) }}">
+                    <span class="th-content">
+                      <span class="th-icon">📅</span>
+                      Last Restock
+                      {% if sort == 'last_restock_date' %}
+                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
+                      {% endif %}
+                    </span>
+                  </a>
+                </th>
+
+                <!-- Actions (not sortable) -->
+                <th>
+                  <span class="th-content">
+                    <span class="th-icon">🛠️</span>
+                    Actions
+                  </span>
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for item in inventory %}
+                <tr class="{% if item.stock_status == 'LOW' %}row-low-stock{% endif %}">
+                  <td><span class="branch-name">{{ item.branch_name }}</span></td>
+
+                  <td class="product-name-cell">
+                    <span class="product-name">{{ item.product_name }}</span>
+                  </td>
+
+                  <td><span class="category-badge">{{ item.category_name }}</span></td>
+
+                  <td>
+                    <span class="qty-value {% if item.stock_status == 'LOW' %}qty-low{% endif %}">
+                      {{ item.on_hand_qty }}
+                    </span>
+                  </td>
+
+                  <td><span class="qty-value qty-min">{{ item.min_qty }}</span></td>
+
+                  <td>
+                    {% if item.stock_status == 'OK' %}
+                      <span class="stock-badge stock-ok">OK</span>
+                    {% else %}
+                      <span class="stock-badge stock-low">LOW</span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    <span class="restock-date">
+                      {{ item.last_restock_date if item.last_restock_date else '—' }}
+                    </span>
+                  </td>
+
+                  <!-- Restock form -->
+                  <td>
+                    {% if session.role in ['admin', 'employee'] %}
+                      <form method="POST"
+                            action="{{ url_for('restock_inventory') }}"
+                            class="restock-form">
+                        <input type="hidden" name="product_id" value="{{ item.product_id }}">
+                        <input type="hidden" name="branch_id" value="{{ item.branch_id }}">
+
+                        <input type="number"
+                               name="restock_qty"
+                               min="1"
+                               step="1"
+                               placeholder="+Qty"
+                               class="restock-input"
+                               required>
+
+                        <button type="submit"
+                                class="restock-btn"
+                                onclick="return confirm('Restock this item?');">
+                          Restock
+                        </button>
+                      </form>
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# -----------------------------
+         NEW: Pagination (preserves filters + sort)
+         ----------------------------- #}
+      {% if total_pages > 1 %}
+        <div class="pagination">
+
+          <!-- Prev -->
+          {% if page > 1 %}
+            <a class="page-btn"
+               href="{{ url_for('inventory',
+                                branch_id=selected_branch_id,
+                                category_id=selected_category_id,
+                                status=selected_status,
+                                sort=sort,
+                                dir=dir,
+                                page=page-1) }}">Prev</a>
+          {% else %}
+            <span class="page-btn disabled">Prev</span>
+          {% endif %}
+
+          <!-- Page numbers -->
+          {% set start = 1 if page-2 < 1 else page-2 %}
+          {% set end = total_pages if page+2 > total_pages else page+2 %}
+
+          <div class="page-numbers">
+            {% for p in range(start, end+1) %}
+              {% if p == page %}
+                <span class="page-number active">{{ p }}</span>
+              {% else %}
+                <a class="page-number"
+                   href="{{ url_for('inventory',
+                                    branch_id=selected_branch_id,
+                                    category_id=selected_category_id,
+                                    status=selected_status,
+                                    sort=sort,
+                                    dir=dir,
+                                    page=p) }}">{{ p }}</a>
+              {% endif %}
+            {% endfor %}
+          </div>
+
+          <!-- Next -->
+          {% if page < total_pages %}
+            <a class="page-btn"
+               href="{{ url_for('inventory',
+                                branch_id=selected_branch_id,
+                                category_id=selected_category_id,
+                                status=selected_status,
+                                sort=sort,
+                                dir=dir,
+                                page=page+1) }}">Next</a>
+          {% else %}
+            <span class="page-btn disabled">Next</span>
+          {% endif %}
+
+          <div class="page-info">
+            Page <b>{{ page }}</b> of <b>{{ total_pages }}</b> — Total: <b>{{ total_records }}</b>
+          </div>
+        </div>
+      {% endif %}
+
+    {% else %}
+      <!-- Empty State -->
+      <div class="empty-state">
+        <div class="empty-icon">📦</div>
+        <h2 class="empty-title">No Inventory Records</h2>
+        <p class="empty-text">There are no inventory records to display at this time.</p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

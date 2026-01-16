@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Product' if mode == 'edit' else 'Add Product' }} - Pets & Things{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section class="page-header">
+    <div class="page-header-content">
+        <div class="page-title-section">
+            <h1 class="page-title">
+                <span class="title-icon">{{ '✏️' if mode == 'edit' else '➕' }}</span>
+                {{ 'Edit Product' if mode == 'edit' else 'Add New Product' }}
+            </h1>
+            <p class="page-subtitle">
+                {{ 'Update the product details below' if mode == 'edit' else 'Fill in the product details below' }}
+            </p>
+        </div>
+    </div>
+</section>
+
+<!-- Form Section -->
+<section class="form-section">
+    <div class="form-container">
+        <div class="form-card">
+            <!-- Error Message -->
+            {% if error %}
+            <div class="error-message">
+                <span class="error-icon">⚠️</span>
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <!-- Success Message -->
+            {% if success %}
+            <div class="success-message">
+                <span class="success-icon">✓</span>
+                {{ success }}
+            </div>
+            {% endif %}
+
+            <form method="POST" class="product-form">
+                <!-- Product Name -->
+                <div class="form-group">
+                    <label for="product_name" class="form-label">Product Name</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🏷️</span>
+                        <input 
+                            type="text" 
+                            id="product_name" 
+                            name="product_name" 
+                            class="form-input"
+                            placeholder="Enter product name"
+                            value="{{ product.product_name if product else '' }}"
+                            required
+                        >
+                    </div>
+                </div>
+
+                <!-- Category -->
+                <div class="form-group">
+                    <label for="category_id" class="form-label">Category</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">📁</span>
+                        <select id="category_id" name="category_id" class="form-input form-select" required>
+                            <option value="">Select a category</option>
+                            {% for category in categories %}
+                            <option value="{{ category.category_id }}" 
+                                {% if product and product.category_id == category.category_id %}selected{% endif %}>
+                                {{ category.category_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Unit Price -->
+                <div class="form-group">
+                    <label for="unit_price" class="form-label">Unit Price ($)</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">💰</span>
+                        <input 
+                            type="number" 
+                            id="unit_price" 
+                            name="unit_price" 
+                            class="form-input"
+                            placeholder="0.00"
+                            step="0.01"
+                            min="0"
+                            value="{{ product.unit_price if product else '' }}"
+                            required
+                        >
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="form-group">
+                    <label for="description" class="form-label">Description</label>
+                    <div class="input-wrapper textarea-wrapper">
+                        <span class="input-icon textarea-icon">📝</span>
+                        <textarea 
+                            id="description" 
+                            name="description" 
+                            class="form-input form-textarea"
+                            placeholder="Enter product description"
+                            rows="4"
+                        >{{ product.description if product else '' }}</textarea>
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div class="form-group">
+                    <label for="is_active" class="form-label">Status</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">📊</span>
+                        <select id="is_active" name="is_active" class="form-input form-select">
+                            <option value="1" {% if not product or product.is_active %}selected{% endif %}>Active</option>
+                            <option value="0" {% if product and not product.is_active %}selected{% endif %}>Inactive</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="form-actions">
+                    <a href="/products" class="btn-secondary">
+                        <span class="btn-icon">✕</span>
+                        Cancel
+                    </a>
+                    <button type="submit" class="btn-primary btn-submit">
+                        <span class="btn-icon">{{ '💾' if mode == 'edit' else '➕' }}</span>
+                        {{ 'Update Product' if mode == 'edit' else 'Add Product' }}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+{% endblock %}

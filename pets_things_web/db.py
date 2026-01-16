@@ -60,12 +60,17 @@ def create_user(full_name, email, password_hash, role='customer'):
     Create a new user in the database.
     Returns True if successful, False otherwise.
     """
+    print("create_user called:", full_name, email, role)
+
     conn = get_connection()
     if not conn:
         return False
     
     try:
         cursor = conn.cursor()
+        cursor.execute("SELECT DATABASE() AS db")
+        print("Flask connected to DB:", cursor.fetchone())
+
         query = """
             INSERT INTO users (full_name, email, password_hash, role, is_active)
             VALUES (%s, %s, %s, %s, 1)

@@ -29,8 +29,6 @@
 
             <!-- Navigation Links -->
             <ul class="navbar-menu" id="navbar-menu">
-                <li><a href="/dashboard" class="navbar-link {% if request.path == '/dashboard' %}active{% endif %}">Dashboard</a></li>
-                
                 <!-- Products dropdown menu with hover functionality -->
                 <li class="nav-dropdown">
                     <a href="/products" class="navbar-link dropdown-trigger {% if '/products' in request.path %}active{% endif %}">
@@ -42,6 +40,11 @@
                         <li><a href="/products/active" class="dropdown-link">Active Products</a></li>
                     </ul>
                 </li>
+                
+                <!-- Inventory link for admin/employee only with LOW stock badge -->
+                {% if session.get('role') in ['admin', 'employee'] %}
+                <li><a href="/inventory" class="navbar-link {% if request.path == '/inventory' %}active{% endif %}">Inventory{% if low_stock_count %} <span class="navbar-badge">LOW: {{ low_stock_count }}</span>{% endif %}</a></li>
+                {% endif %}
                 
                 <li><a href="/sales" class="navbar-link {% if request.path == '/sales' %}active{% endif %}">Sales</a></li>
                 <li><a href="/purchases" class="navbar-link {% if request.path == '/purchases' %}active{% endif %}">Purchases</a></li>

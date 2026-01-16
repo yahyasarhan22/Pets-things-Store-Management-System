@@ -72,11 +72,11 @@ CREATE TABLE stock (
 -- =========================================================
 -- 03) INSERT SAMPLE DATA (SMALL & CLEAN)
 -- =========================================================
-
+select database();
 -- Admin user (temporary password hash)
 INSERT INTO users (full_name, email, password_hash, role)
 VALUES ('Owner Admin', 'admin@pets.com', 'TEMP_HASH', 'admin');
-
+select * from users;
 -- Categories (4 only)
 INSERT INTO category (category_name) VALUES
 ('Pet Food'),
@@ -183,3 +183,9 @@ SELECT
 FROM product p
 INNER JOIN category c ON p.category_id = c.category_id
 ORDER BY p.product_name;
+SELECT * FROM product ORDER BY product_id DESC;
+select * from users;
+show tables;
+SELECT DATABASE();
+SELECT COUNT(*) FROM users;
+SELECT * FROM users ORDER BY 1 DESC LIMIT 5;

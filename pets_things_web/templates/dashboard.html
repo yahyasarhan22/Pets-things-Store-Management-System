@@ -32,15 +32,20 @@
             </div>
         </div>
 
-        <div class="stat-card">
+        <a href="{{ url_for('inventory', status='LOW') }}" class="stat-card stat-card-low-stock {% if low_stock_count and low_stock_count > 0 %}stat-card-alert{% endif %}" style="cursor: pointer; text-decoration: none; color: inherit;">
             <div class="stat-icon stat-icon-stock">
                 <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Low Stock">
             </div>
             <div class="stat-info">
-                <span class="stat-value">{{ low_stock|default('--') }}</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="stat-value">{{ low_stock_count if low_stock_count is defined else '--' }}</span>
+                    {% if low_stock_count and low_stock_count > 0 %}
+                        <span style="font-size: 1.2rem;">⚠️</span>
+                    {% endif %}
+                </div>
                 <span class="stat-label">Low Stock Items</span>
             </div>
-        </div>
+        </a>
 
         <div class="stat-card">
             <div class="stat-icon stat-icon-sales">
