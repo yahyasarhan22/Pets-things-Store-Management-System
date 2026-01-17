@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Bookings - Admin - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">📋</span>Bookings Management</h1>
+      <p class="page-subtitle">View all bookings and details</p>
+    </div>
+  </div>
+</section>
+
+<section class="inventory-section">
+  <div class="inventory-container">
+
+    {% if error %}
+      <div class="alert error"><span class="error-icon">⚠️</span>{{ error }}</div>
+    {% endif %}
+
+    <div class="form-card" style="max-width:100%;">
+      <div style="padding:24px;">
+        <form method="GET" action="{{ url_for('admin_bookings') }}"
+              style="display:grid; grid-template-columns: 1fr 1fr 1fr auto auto; gap:12px; align-items:end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Status</label>
+            <select class="form-input" name="status">
+              <option value="">All</option>
+              {% for s in ['PENDING','CONFIRMED','CANCELLED','COMPLETED'] %}
+                <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">From</label>
+            <input class="form-input" type="date" name="date_from" value="{{ date_from }}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">To</label>
+            <input class="form-input" type="date" name="date_to" value="{{ date_to }}">
+          </div>
+          <button class="btn-primary" type="submit">Apply</button>
+          <a class="btn-secondary" href="{{ url_for('admin_bookings') }}" style="text-align:center;">Reset</a>
+        </form>
+      </div>
+    </div>
+
+    <div class="form-card" style="max-width:100%; margin-top:18px;">
+      <div style="padding:24px;">
+        <div class="table-wrapper">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Customer</th>
+                <th>Dates</th>
+                <th>Status</th>
+                <th>Rooms & Cats</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if rows and rows|length > 0 %}
+                {% for r in rows %}
+                <tr>
+                  <td><strong>#{{ r.booking_id }}</strong></td>
+                  <td>{{ r.customer_name }}</td>
+                  <td>{{ r.date_from }} → {{ r.date_to }}</td>
+                  <td><strong>{{ r.status }}</strong></td>
+                  <td>
+                    {% for line in r.lines %}
+                      <div>🏨 {{ line.room_number }} — 🐱 {{ line.cat_name }}</div>
+                    {% endfor %}
+                  </td>
+                  <td><strong>${{ "%.2f"|format(r.total_amount) }}</strong></td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr><td colspan="6" style="text-align:center; padding:16px;">No bookings found.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endblock %}

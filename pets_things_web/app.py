@@ -627,7 +627,6 @@ def transfer_stock():
     try:
         performed_by = session.get("user_id")
         cur = conn.cursor(dictionary=True)
-        conn.start_transaction()
 
         # 1) Check warehouse stock
         cur.execute("""
@@ -915,7 +914,6 @@ def purchase_complete(purchase_id):
     try:
         performed_by = session.get("user_id")
         cur = conn.cursor(dictionary=True)
-        conn.start_transaction()
 
         # Get purchase header
         cur.execute("SELECT warehouse_id FROM purchase WHERE purchase_id = %s", (purchase_id,))
@@ -1079,7 +1077,6 @@ def restock_inventory():
         performed_by = session.get("user_id")  # who restocked (admin/employee)
 
         cur = conn.cursor()
-        conn.start_transaction()
 
         # 1) Update stock
         cur.execute("""
@@ -1502,7 +1499,6 @@ def sale_complete(sale_id):
     try:
         performed_by = session.get("user_id")
         cur = conn.cursor(dictionary=True)
-        conn.start_transaction()
 
         # Get sale header
         cur.execute("SELECT sale_id, branch_id FROM sale WHERE sale_id = %s", (sale_id,))
@@ -2210,6 +2206,656 @@ def get_warehouse_summary():
         if conn.is_connected():
             cur.close()
             conn.close()
+###############Bookings#################  
+def calc_nights_and_discount(date_from, date_to):
+    # date_from/date_to are Python date objects
+    nights = (date_to - date_from).days
+    if nights <= 0:
+        return 0, 0.0
+    discount = 10.0 if nights > 10 else 0.0
+    return nights, discount
+
+@app.route("/booking/search")
+@role_required("customer", "admin", "employee")  # allow employees to use it too
+def booking_search():
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+
+    rooms = []
+    error = None
+
+    if date_from and date_to:
+        conn = get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT r.room_id, r.room_number, r.room_type
+                FROM room r
+                WHERE r.is_active = 1
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM booking_room br
+                  JOIN booking b ON b.booking_id = br.booking_id
+                  WHERE br.room_id = r.room_id
+                    AND b.status IN ('PENDING','CONFIRMED')
+                    AND b.date_from < %s
+                    AND b.date_to   > %s
+                )
+                ORDER BY r.room_number
+            """, (date_to, date_from))
+            rooms = cur.fetchall()
+        except Exception as e:
+            print("booking_search error:", e)
+            error = "Error loading rooms"
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("booking_search.html",
+                           rooms=rooms,
+                           date_from=date_from,
+                           date_to=date_to,
+                           error=error)
+
+
+@app.route("/bookings")
+@login_required
+def bookings_home():
+    role = session.get("role")
+    if role in ("admin", "employee"):
+        return redirect(url_for("admin_bookings"))
+    return redirect(url_for("booking_search"))
+
+@app.route("/admin/bookings")
+@role_required("admin", "employee")
+def admin_bookings():
+    status = (request.args.get("status") or "").strip().upper()
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+
+    conn = get_connection()
+    if not conn:
+        return render_template("admin_bookings.html", rows=[], error="DB connection failed",
+                               status=status, date_from=date_from, date_to=date_to)
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        conditions = []
+        params = []
+
+        if status in ("PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"):
+            conditions.append("b.status = %s")
+            params.append(status)
+
+        if date_from:
+            conditions.append("b.date_from >= %s")
+            params.append(date_from)
+
+        if date_to:
+            conditions.append("b.date_to <= %s")
+            params.append(date_to)
+
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        cur.execute(f"""
+            SELECT
+              b.booking_id, b.date_from, b.date_to, b.status, b.total_amount, b.created_at,
+              u.full_name AS customer_name
+            FROM booking b
+            JOIN users u ON b.customer_id = u.user_id
+            {where_clause}
+            ORDER BY b.created_at DESC
+            LIMIT 200
+        """, params)
+
+        rows = cur.fetchall()
+
+        # attach line details
+        for r in rows:
+            cur.execute("""
+                SELECT r2.room_number, c.cat_name
+                FROM booking_room br
+                JOIN room r2 ON br.room_id = r2.room_id
+                JOIN cat c ON br.cat_id = c.cat_id
+                WHERE br.booking_id = %s
+                ORDER BY r2.room_number
+            """, (r["booking_id"],))
+            r["lines"] = cur.fetchall()
+
+        return render_template("admin_bookings.html", rows=rows, error=None,
+                               status=status, date_from=date_from, date_to=date_to)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/my-cats", methods=["GET", "POST"])
+@role_required("customer")
+def my_cats():
+    user_id = session.get("user_id")
+
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("dashboard"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        if request.method == "POST":
+            cat_name = (request.form.get("cat_name") or "").strip()
+            breed = (request.form.get("breed") or "").strip() or None
+            age_years = request.form.get("age_years", type=int)
+            gender = (request.form.get("gender") or "").strip() or None
+            medical_notes = (request.form.get("medical_notes") or "").strip() or None
+
+            if not cat_name:
+                flash("Cat name is required.", "warning")
+            else:
+                cur.execute("""
+                    INSERT INTO cat (owner_id, cat_name, breed, age_years, gender, medical_notes, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s, 1)
+                """, (user_id, cat_name, breed, age_years, gender, medical_notes))
+                conn.commit()
+                flash("Cat saved successfully.", "success")
+                return redirect(url_for("my_cats"))
+
+        cur.execute("""
+            SELECT cat_id, cat_name, breed, age_years, gender, medical_notes
+            FROM cat
+            WHERE owner_id = %s AND is_active = 1
+            ORDER BY cat_name
+        """, (user_id,))
+        cats = cur.fetchall()
+
+        return render_template("my_cats.html", cats=cats)
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route("/my-bookings")
+@role_required("customer")
+def my_bookings():
+    user_id = session.get("user_id")
+
+    conn = get_connection()
+    if not conn:
+        return render_template("my_bookings.html", bookings=[], error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("""
+            SELECT
+              b.booking_id, b.date_from, b.date_to, b.status, b.total_amount, b.created_at
+            FROM booking b
+            WHERE b.customer_id = %s
+            ORDER BY b.created_at DESC
+        """, (user_id,))
+        bookings = cur.fetchall()
+
+        # Load rooms/cats for each booking (simple approach)
+        for bk in bookings:
+            cur.execute("""
+                SELECT r.room_number, c.cat_name, br.line_total
+                FROM booking_room br
+                JOIN room r ON br.room_id = r.room_id
+                JOIN cat c ON br.cat_id = c.cat_id
+                WHERE br.booking_id = %s
+                ORDER BY r.room_number
+            """, (bk["booking_id"],))
+            bk["lines"] = cur.fetchall()
+
+        return render_template("my_bookings.html", bookings=bookings, error=None)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+from datetime import datetime
+
+@app.route("/booking/new", methods=["GET", "POST"])
+@role_required("customer", "admin", "employee")
+def booking_new():
+    user_id = session.get("user_id")
+    role = session.get("role")
+
+    date_from = (request.values.get("date_from") or "").strip()
+    date_to = (request.values.get("date_to") or "").strip()
+
+    if not date_from or not date_to:
+        flash("Please choose date range first.", "warning")
+        return redirect(url_for("booking_search"))
+
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("booking_search"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Load customer cats (saved)
+        # If employee/admin is creating booking for customer, later we can add customer selector
+        cur.execute("""
+            SELECT cat_id, cat_name
+            FROM cat
+            WHERE owner_id = %s AND is_active = 1
+            ORDER BY cat_name
+        """, (user_id,))
+        cats = cur.fetchall()
+
+        # Load available rooms for the range
+        cur.execute("""
+            SELECT r.room_id, r.room_number, r.room_type
+            FROM room r
+            WHERE r.is_active = 1
+            AND NOT EXISTS (
+              SELECT 1
+              FROM booking_room br
+              JOIN booking b ON b.booking_id = br.booking_id
+              WHERE br.room_id = r.room_id
+                AND b.status IN ('PENDING','CONFIRMED')
+                AND b.date_from < %s
+                AND b.date_to   > %s
+            )
+            ORDER BY r.room_number
+        """, (date_to, date_from))
+        rooms = cur.fetchall()
+
+        if request.method == "POST":
+            selected_cat_ids = request.form.getlist("cat_ids")      # list of strings
+            selected_room_ids = request.form.getlist("room_ids")    # list of strings
+
+            # Validate counts: cats == rooms
+            if not selected_cat_ids:
+                flash("Select at least one cat.", "warning")
+                df = datetime.strptime(date_from, "%Y-%m-%d").date()
+                dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+                nights, discount = calc_nights_and_discount(df, dt)
+                price_per_night = 30.0
+                base_per_room = nights * price_per_night
+                line_total_per_room = base_per_room * (1 - discount / 100.0)
+                return render_template("booking_new.html", cats=cats, rooms=rooms,
+                                       date_from=date_from, date_to=date_to,
+                                       nights=nights, discount=discount, price_per_night=price_per_night,
+                                       base_per_room=base_per_room, line_total_per_room=line_total_per_room)
+
+            if len(selected_cat_ids) != len(selected_room_ids):
+                flash("Number of rooms must equal number of cats (1 room per cat).", "danger")
+                df = datetime.strptime(date_from, "%Y-%m-%d").date()
+                dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+                nights, discount = calc_nights_and_discount(df, dt)
+                price_per_night = 30.0
+                base_per_room = nights * price_per_night
+                line_total_per_room = base_per_room * (1 - discount / 100.0)
+                return render_template("booking_new.html", cats=cats, rooms=rooms,
+                                       date_from=date_from, date_to=date_to,
+                                       nights=nights, discount=discount, price_per_night=price_per_night,
+                                       base_per_room=base_per_room, line_total_per_room=line_total_per_room)
+
+            # Convert to ints
+            selected_cat_ids = [int(x) for x in selected_cat_ids]
+            selected_room_ids = [int(x) for x in selected_room_ids]
+
+            # Basic date validation in DB and app
+            df = datetime.strptime(date_from, "%Y-%m-%d").date()
+            dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+            nights, discount = calc_nights_and_discount(df, dt)
+            if nights <= 0:
+                flash("Invalid dates. date_to must be after date_from.", "danger")
+                price_per_night = 30.0
+                base_per_room = nights * price_per_night
+                line_total_per_room = base_per_room * (1 - discount / 100.0)
+                return render_template("booking_new.html", cats=cats, rooms=rooms,
+                                       date_from=date_from, date_to=date_to,
+                                       nights=nights, discount=discount, price_per_night=price_per_night,
+                                       base_per_room=base_per_room, line_total_per_room=line_total_per_room)
+
+            # Price
+            price_per_night = 30.0
+            line_base = nights * price_per_night
+            line_total = line_base * (1 - discount / 100.0)
+            total_amount = line_total * len(selected_room_ids)
+
+            # Re-check availability for each selected room (lock)
+            for rid in selected_room_ids:
+                cur.execute("""
+                    SELECT r.room_id
+                    FROM room r
+                    WHERE r.room_id = %s AND r.is_active = 1
+                    FOR UPDATE
+                """, (rid,))
+                if not cur.fetchone():
+                    conn.rollback()
+                    flash("One selected room is invalid.", "danger")
+                    return redirect(url_for("booking_search", date_from=date_from, date_to=date_to))
+
+                # Overlap check
+                cur.execute("""
+                    SELECT 1
+                    FROM booking_room br
+                    JOIN booking b ON b.booking_id = br.booking_id
+                    WHERE br.room_id = %s
+                      AND b.status IN ('PENDING','CONFIRMED')
+                      AND b.date_from < %s
+                      AND b.date_to   > %s
+                    LIMIT 1
+                    FOR UPDATE
+                """, (rid, date_to, date_from))
+                if cur.fetchone():
+                    conn.rollback()
+                    flash("A selected room just became unavailable. Please search again.", "warning")
+                    return redirect(url_for("booking_search", date_from=date_from, date_to=date_to))
+
+            # Create booking header
+            customer_id = user_id
+            created_by = user_id
+
+            cur.execute("""
+                INSERT INTO booking (customer_id, date_from, date_to, status, created_by, total_amount)
+                VALUES (%s, %s, %s, 'PENDING', %s, %s)
+            """, (customer_id, date_from, date_to, created_by, total_amount))
+            booking_id = cur.lastrowid
+
+            # Insert booking lines (pair each cat with a room)
+            # simple pairing: cat_ids[i] -> room_ids[i]
+            for i in range(len(selected_cat_ids)):
+                cur.execute("""
+                    INSERT INTO booking_room
+                      (booking_id, room_id, cat_id, nights, price_per_night, discount_percent, line_total)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (booking_id, selected_room_ids[i], selected_cat_ids[i],
+                      nights, price_per_night, discount, line_total))
+
+            conn.commit()
+            flash("Booking created! (Status: PENDING)", "success")
+            return redirect(url_for("my_bookings"))
+
+        # GET: show price preview basic
+        df = datetime.strptime(date_from, "%Y-%m-%d").date()
+        dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+        nights, discount = calc_nights_and_discount(df, dt)
+        
+        price_per_night = 30.0
+        base_per_room = nights * price_per_night
+        line_total_per_room = base_per_room * (1 - discount / 100.0)
+
+        return render_template("booking_new.html",
+                               cats=cats, rooms=rooms,
+                               date_from=date_from, date_to=date_to,
+                               nights=nights, discount=discount, price_per_night=price_per_night,
+                               base_per_room=base_per_room, line_total_per_room=line_total_per_room)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/admin/bookings/<int:booking_id>/confirm", methods=["POST"])
+@role_required("admin", "employee")
+def booking_confirm(booking_id):
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("admin_bookings"))
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE booking
+            SET status = 'CONFIRMED'
+            WHERE booking_id = %s AND status = 'PENDING'
+        """, (booking_id,))
+        conn.commit()
+
+        if cur.rowcount == 0:
+            flash("Booking not found or not in PENDING status.", "warning")
+        else:
+            flash("Booking confirmed successfully.", "success")
+
+        return redirect(url_for("admin_bookings"))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/admin/bookings/<int:booking_id>/cancel", methods=["POST"])
+@role_required("admin", "employee")
+def booking_cancel(booking_id):
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("admin_bookings"))
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE booking
+            SET status = 'CANCELLED'
+            WHERE booking_id = %s AND status IN ('PENDING','CONFIRMED')
+        """, (booking_id,))
+        conn.commit()
+
+        if cur.rowcount == 0:
+            flash("Booking not found or cannot be cancelled.", "warning")
+        else:
+            flash("Booking cancelled.", "success")
+
+        return redirect(url_for("admin_bookings"))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/admin/bookings/<int:booking_id>/complete", methods=["POST"])
+@role_required("admin", "employee")
+def booking_complete(booking_id):
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for("admin_bookings"))
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE booking
+            SET status = 'COMPLETED'
+            WHERE booking_id = %s AND status = 'CONFIRMED'
+        """, (booking_id,))
+        conn.commit()
+
+        if cur.rowcount == 0:
+            flash("Booking must be CONFIRMED before completing.", "warning")
+        else:
+            flash("Booking marked as COMPLETED.", "success")
+
+        return redirect(url_for("admin_bookings"))
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route("/admin/bookings/today")
+@role_required("admin", "employee")
+def bookings_today():
+    conn = get_connection()
+    if not conn:
+        return render_template("bookings_today.html",
+                               checkins=[],
+                               checkouts=[],
+                               error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # ✅ Check-ins today (start date = today)
+        cur.execute("""
+            SELECT
+                b.booking_id,
+                b.date_from,
+                b.date_to,
+                b.status,
+                b.total_amount,
+                u.full_name AS customer_name
+            FROM booking b
+            JOIN users u ON b.customer_id = u.user_id
+            WHERE b.date_from = CURDATE()
+              AND b.status IN ('CONFIRMED', 'PENDING')
+            ORDER BY b.created_at ASC
+        """)
+        checkins = cur.fetchall()
+
+        # Attach room+cat lines
+        for bk in checkins:
+            cur.execute("""
+                SELECT r.room_number, c.cat_name
+                FROM booking_room br
+                JOIN room r ON br.room_id = r.room_id
+                JOIN cat c ON br.cat_id = c.cat_id
+                WHERE br.booking_id = %s
+                ORDER BY r.room_number
+            """, (bk["booking_id"],))
+            bk["lines"] = cur.fetchall()
+
+        # ✅ Check-outs today (end date = today)
+        cur.execute("""
+            SELECT
+                b.booking_id,
+                b.date_from,
+                b.date_to,
+                b.status,
+                b.total_amount,
+                u.full_name AS customer_name
+            FROM booking b
+            JOIN users u ON b.customer_id = u.user_id
+            WHERE b.date_to = CURDATE()
+              AND b.status IN ('CONFIRMED', 'COMPLETED')
+            ORDER BY b.created_at ASC
+        """)
+        checkouts = cur.fetchall()
+
+        for bk in checkouts:
+            cur.execute("""
+                SELECT r.room_number, c.cat_name
+                FROM booking_room br
+                JOIN room r ON br.room_id = r.room_id
+                JOIN cat c ON br.cat_id = c.cat_id
+                WHERE br.booking_id = %s
+                ORDER BY r.room_number
+            """, (bk["booking_id"],))
+            bk["lines"] = cur.fetchall()
+
+        return render_template("bookings_today.html",
+                               checkins=checkins,
+                               checkouts=checkouts,
+                               error=None)
+
+    except Exception as e:
+        print("bookings_today error:", e)
+        return render_template("bookings_today.html",
+                               checkins=[],
+                               checkouts=[],
+                               error="Error loading today's bookings")
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+
+@app.route("/admin/rooms/occupancy")
+@role_required("admin", "employee")
+def rooms_occupancy():
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+
+    # Default: today -> tomorrow (1 night view)
+    if not date_from or not date_to:
+        from datetime import date, timedelta
+        df = date.today()
+        dt = df + timedelta(days=1)
+        date_from = df.strftime("%Y-%m-%d")
+        date_to = dt.strftime("%Y-%m-%d")
+
+    rows = []
+    error = None
+
+    conn = get_connection()
+    if not conn:
+        return render_template("rooms_occupancy.html",
+                               rows=[],
+                               date_from=date_from,
+                               date_to=date_to,
+                               error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Fetch all rooms + any overlapping booking line (if exists)
+        # Overlap: b.date_from < date_to AND b.date_to > date_from
+        cur.execute("""
+            SELECT
+              r.room_id,
+              r.room_number,
+              r.room_type,
+              r.is_active,
+
+              b.booking_id,
+              b.status AS booking_status,
+              b.date_from AS booking_from,
+              b.date_to AS booking_to,
+              u.full_name AS customer_name,
+              c.cat_name
+
+            FROM room r
+            LEFT JOIN booking_room br
+              ON br.room_id = r.room_id
+            LEFT JOIN booking b
+              ON b.booking_id = br.booking_id
+             AND b.status IN ('PENDING','CONFIRMED')
+             AND b.date_from < %s
+             AND b.date_to   > %s
+            LEFT JOIN users u
+              ON u.user_id = b.customer_id
+            LEFT JOIN cat c
+              ON c.cat_id = br.cat_id
+
+            WHERE r.is_active = 1
+            ORDER BY r.room_number
+        """, (date_to, date_from))
+
+        rows = cur.fetchall()
+
+        # Normalize: if booking_id is NULL => available
+        for r in rows:
+            r["is_occupied"] = True if r.get("booking_id") else False
+
+        return render_template("rooms_occupancy.html",
+                               rows=rows,
+                               date_from=date_from,
+                               date_to=date_to,
+                               error=error)
+
+    except Exception as e:
+        print("rooms_occupancy error:", e)
+        error = "Error loading occupancy."
+        return render_template("rooms_occupancy.html",
+                               rows=[],
+                               date_from=date_from,
+                               date_to=date_to,
+                               error=error)
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+
 
 
 @app.route('/login', methods=['GET', 'POST'])

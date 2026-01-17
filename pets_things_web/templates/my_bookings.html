@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}My Bookings - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">📌</span>My Bookings</h1>
+      <p class="page-subtitle">Track your room reservations</p>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('booking_search') }}" class="btn-primary">➕ New Booking</a>
+      <a href="{{ url_for('my_cats') }}" class="btn-secondary">🐱 My Cats</a>
+    </div>
+  </div>
+</section>
+
+<section class="inventory-section">
+  <div class="inventory-container">
+
+    {% if error %}
+      <div class="alert error"><span class="error-icon">⚠️</span>{{ error }}</div>
+    {% endif %}
+
+    {% if bookings and bookings|length > 0 %}
+      <div class="form-card" style="max-width:100%;">
+        <div style="padding:24px;">
+          <div class="table-wrapper">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Dates</th>
+                  <th>Status</th>
+                  <th>Rooms & Cats</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for b in bookings %}
+                <tr>
+                  <td><strong>#{{ b.booking_id }}</strong></td>
+                  <td>{{ b.date_from }} → {{ b.date_to }}</td>
+                  <td><strong>{{ b.status }}</strong></td>
+                  <td>
+                    {% for line in b.lines %}
+                      <div>🏨 {{ line.room_number }} — 🐱 {{ line.cat_name }}</div>
+                    {% endfor %}
+                  </td>
+                  <td><strong>${{ "%.2f"|format(b.total_amount) }}</strong></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty-state" style="padding:70px 40px;">
+        <div class="empty-icon" style="font-size:4rem;">🏨</div>
+        <h2 class="empty-title">No Bookings Yet</h2>
+        <p class="empty-text">Start by searching availability and creating your first booking.</p>
+        <a href="{{ url_for('booking_search') }}" class="btn-primary" style="margin-top:18px; display:inline-block;">➕ Create Booking</a>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

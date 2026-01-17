@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Room Availability - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">🏨</span>Room Availability</h1>
+      <p class="page-subtitle">Pick dates to see available rooms</p>
+    </div>
+    {% if session.get('role') == 'customer' %}
+      <div class="header-actions">
+        <a href="{{ url_for('my_cats') }}" class="btn-secondary">🐱 My Cats</a>
+        <a href="{{ url_for('my_bookings') }}" class="btn-primary">📌 My Bookings</a>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="inventory-section">
+  <div class="inventory-container">
+    {% if error %}
+      <div class="alert error" style="margin-bottom:16px;">
+        <span class="error-icon">⚠️</span>{{ error }}
+      </div>
+    {% endif %}
+
+    <div class="form-card" style="max-width:100%;">
+      <div style="padding:24px;">
+        <form method="GET" action="{{ url_for('booking_search') }}"
+              style="display:grid; grid-template-columns: 1fr 1fr auto; gap:12px; align-items:end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">📅 From</label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" name="date_from" value="{{ date_from }}" style="padding-left:40px;">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">📅 To</label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" name="date_to" value="{{ date_to }}" style="padding-left:40px;">
+            </div>
+          </div>
+
+          <button class="btn-primary" type="submit" style="height:44px;">🔍 Search</button>
+        </form>
+
+        {% if date_from and date_to %}
+          <div class="info-notice" style="margin-top:16px;">
+            <span class="info-icon">ℹ️</span>
+            <div class="info-text">
+              Found <strong>{{ rooms|length }}</strong> available room(s).
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if rooms and rooms|length > 0 %}
+      <div class="form-card" style="max-width:100%; margin-top:18px;">
+        <div style="padding:24px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <span style="font-size:1.4rem;">✅</span>
+            <h2 style="margin:0;">Available Rooms</h2>
+            {% if session.get('role') == 'customer' %}
+              <a class="btn-primary" style="margin-left:auto;"
+                 href="{{ url_for('booking_new', date_from=date_from, date_to=date_to) }}">
+                ➕ Start Booking
+              </a>
+            {% endif %}
+          </div>
+
+          <div class="table-wrapper">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th>Room</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in rooms %}
+                <tr>
+                  <td><strong>{{ r.room_number }}</strong></td>
+                  <td>{{ r.room_type }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if session.get('role') == 'customer' %}
+            <div class="info-notice" style="margin-top:16px;">
+              <span class="info-icon">💡</span>
+              <div class="info-text">
+                You must select <strong>1 room per cat</strong> in the next step.
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}My Cats - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">🐱</span>My Cats</h1>
+      <p class="page-subtitle">Add and manage your cats</p>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('booking_search') }}" class="btn-secondary">🏨 Book a Room</a>
+      <a href="{{ url_for('my_bookings') }}" class="btn-primary">📌 My Bookings</a>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-container">
+    <div class="form-card" style="max-width:100%;">
+      <div style="padding:24px;">
+        <h2 style="margin-top:0;">➕ Add New Cat</h2>
+
+        <form method="POST" action="{{ url_for('my_cats') }}"
+              style="display:grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap:12px; align-items:end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Name *</label>
+            <input class="form-input" name="cat_name" placeholder="e.g., Luna" required>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Breed</label>
+            <input class="form-input" name="breed" placeholder="Optional">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Age</label>
+            <input class="form-input" name="age_years" type="number" min="0" placeholder="Optional">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Gender</label>
+            <select class="form-input" name="gender">
+              <option value="">--</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="grid-column: 1 / -1; margin-bottom:0;">
+            <label class="form-label">Medical Notes</label>
+            <input class="form-input" name="medical_notes" placeholder="Optional notes (allergies, meds, etc.)">
+          </div>
+
+          <button class="btn-primary" type="submit" style="grid-column: 1 / -1;">✅ Save Cat</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="form-card" style="max-width:100%; margin-top:18px;">
+      <div style="padding:24px;">
+        <h2 style="margin-top:0;">🐾 Your Cats</h2>
+
+        {% if cats and cats|length > 0 %}
+          <div class="table-wrapper">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Breed</th>
+                  <th>Age</th>
+                  <th>Gender</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in cats %}
+                <tr>
+                  <td><strong>{{ c.cat_name }}</strong></td>
+                  <td>{{ c.breed or '--' }}</td>
+                  <td>{{ c.age_years if c.age_years is not none else '--' }}</td>
+                  <td>{{ c.gender or '--' }}</td>
+                  <td>{{ c.medical_notes or '--' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="empty-state" style="padding:40px;">
+            <div class="empty-icon" style="font-size:3rem;">🐱</div>
+            <h2 class="empty-title">No Cats Yet</h2>
+            <p class="empty-text">Add your first cat above to start booking rooms.</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}New Booking - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">🧾</span>New Booking</h1>
+      <p class="page-subtitle">Select cats and rooms (1 room per cat)</p>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('my_cats') }}" class="btn-secondary">🐱 Add/Manage Cats</a>
+      <a href="{{ url_for('booking_search') }}" class="btn-secondary">⬅ Back</a>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-container">
+    <div class="form-card" style="max-width:100%;">
+      <div style="padding:24px;">
+
+        <div class="info-notice" style="margin-bottom:16px;">
+          <span class="info-icon">📌</span>
+          <div class="info-text">
+            <strong>Dates:</strong> {{ date_from }} → {{ date_to }} |
+            <strong>Nights:</strong> {{ nights }} |
+            <strong>Price:</strong> ${{ "%.2f"|format(price_per_night) }}/night |
+            <strong>Discount:</strong> {{ discount }}%
+          </div>
+        </div>
+
+        <div class="info-notice" style="margin-bottom:16px;">
+          <span class="info-icon">💰</span>
+          <div class="info-text">
+            <strong>Per room:</strong>
+            Base ${{ "%.2f"|format(base_per_room) }},
+            After discount ${{ "%.2f"|format(line_total_per_room) }}
+          </div>
+        </div>
+
+        {% if cats|length == 0 %}
+          <div class="alert error">
+            <span class="error-icon">⚠️</span>
+            You have no cats saved yet. Please add a cat first.
+          </div>
+          <a href="{{ url_for('my_cats') }}" class="btn-primary" style="margin-top:12px; display:inline-block;">
+            ➕ Add Cat
+          </a>
+        {% else %}
+          <form method="POST" action="{{ url_for('booking_new') }}">
+            <input type="hidden" name="date_from" value="{{ date_from }}">
+            <input type="hidden" name="date_to" value="{{ date_to }}">
+
+            <div class="form-group">
+              <label class="form-label">🐱 Select Cats (choose how many cats)</label>
+              <div class="info-notice" style="margin-top:10px;">
+                <span class="info-icon">ℹ️</span>
+                <div class="info-text">Number of selected cats must equal selected rooms.</div>
+              </div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;">
+                {% for c in cats %}
+                  <label style="display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid var(--border-color); border-radius:10px;">
+                    <input type="checkbox" name="cat_ids" value="{{ c.cat_id }}">
+                    <strong>{{ c.cat_name }}</strong>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:18px;">
+              <label class="form-label">🏨 Select Rooms (same count as cats)</label>
+
+              {% if rooms|length == 0 %}
+                <div class="alert error">
+                  <span class="error-icon">⚠️</span>
+                  No rooms available for this range.
+                </div>
+              {% else %}
+                <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;">
+                  {% for r in rooms %}
+                    <label style="display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid var(--border-color); border-radius:10px;">
+                      <input type="checkbox" name="room_ids" value="{{ r.room_id }}">
+                      <strong>{{ r.room_number }}</strong>
+                      <span style="color:var(--text-secondary);">({{ r.room_type }})</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="form-actions" style="margin-top:22px; display:flex; gap:12px;">
+              <button type="submit" class="btn-primary" style="flex:1;">✅ Create Booking</button>
+              <a href="{{ url_for('booking_search', date_from=date_from, date_to=date_to) }}" class="btn-secondary" style="flex:1; text-align:center;">❌ Cancel</a>
+            </div>
+
+            <div class="info-notice" style="margin-top:16px;">
+              <span class="info-icon">📝</span>
+              <div class="info-text">
+                Booking will be created as <strong>PENDING</strong>. Staff can confirm it.
+              </div>
+            </div>
+
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Room Occupancy - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">🛏️</span>Room Occupancy</h1>
+      <p class="page-subtitle">See which rooms are available or occupied for a date range</p>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('bookings_today') }}" class="btn-secondary">📅 Today</a>
+      <a href="{{ url_for('admin_bookings') }}" class="btn-secondary">📋 All Bookings</a>
+    </div>
+  </div>
+</section>
+
+<section class="inventory-section">
+  <div class="inventory-container">
+
+    {% if error %}
+      <div class="alert error" style="margin-bottom:16px;">
+        <span class="error-icon">⚠️</span>{{ error }}
+      </div>
+    {% endif %}
+
+    <!-- Filter -->
+    <div class="form-card" style="max-width:100%;">
+      <div style="padding:24px;">
+        <form method="GET" action="{{ url_for('rooms_occupancy') }}"
+              style="display:grid; grid-template-columns: 1fr 1fr auto auto; gap:12px; align-items:end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">📅 From</label>
+            <input class="form-input" type="date" name="date_from" value="{{ date_from }}">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">📅 To</label>
+            <input class="form-input" type="date" name="date_to" value="{{ date_to }}">
+          </div>
+          <button class="btn-primary" type="submit">Apply</button>
+          <a class="btn-secondary" href="{{ url_for('rooms_occupancy') }}" style="text-align:center;">Reset</a>
+        </form>
+
+        <div class="info-notice" style="margin-top:14px;">
+          <span class="info-icon">ℹ️</span>
+          <div class="info-text">
+            Range: <strong>{{ date_from }}</strong> → <strong>{{ date_to }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary cards -->
+    {% set available_count = (rows | selectattr("is_occupied", "equalto", False) | list | length) %}
+    {% set occupied_count = (rows | selectattr("is_occupied", "equalto", True) | list | length) %}
+
+    <section class="inventory-summary-section">
+      <div class="inventory-summary-cards">
+        <div class="inv-card">
+          <div class="inv-card-icon">✅</div>
+          <div class="inv-card-content">
+            <div class="inv-card-label">Available</div>
+            <div class="inv-card-value">{{ available_count }}</div>
+          </div>
+        </div>
+        <div class="inv-card">
+          <div class="inv-card-icon">🔒</div>
+          <div class="inv-card-content">
+            <div class="inv-card-label">Occupied</div>
+            <div class="inv-card-value">{{ occupied_count }}</div>
+          </div>
+        </div>
+        <div class="inv-card">
+          <div class="inv-card-icon">🏨</div>
+          <div class="inv-card-content">
+            <div class="inv-card-label">Total Rooms</div>
+            <div class="inv-card-value">{{ rows|length }}</div>
+          </div>
+        </div>
+        <div class="inv-card">
+          <div class="inv-card-icon">🗓️</div>
+          <div class="inv-card-content">
+            <div class="inv-card-label">Date Range</div>
+            <div class="inv-card-value">{{ date_from }} → {{ date_to }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Occupancy table -->
+    <div class="form-card" style="max-width:100%; margin-top:18px;">
+      <div style="padding:24px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+          <span style="font-size:1.5rem;">🧾</span>
+          <h2 style="margin:0;">Rooms</h2>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>Room</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Booking</th>
+                <th>Customer</th>
+                <th>Cat</th>
+                <th>Booking Dates</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if rows and rows|length > 0 %}
+                {% for r in rows %}
+                <tr class="{% if r.is_occupied %}row-low-stock{% endif %}">
+                  <td><strong>{{ r.room_number }}</strong></td>
+                  <td>{{ r.room_type }}</td>
+                  <td>
+                    {% if r.is_occupied %}
+                      <span class="stock-badge stock-low">Occupied</span>
+                    {% else %}
+                      <span class="stock-badge stock-ok">Available</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if r.is_occupied %}
+                      <strong>#{{ r.booking_id }}</strong> ({{ r.booking_status }})
+                    {% else %}
+                      --
+                    {% endif %}
+                  </td>
+                  <td>{{ r.customer_name or '--' }}</td>
+                  <td>{{ r.cat_name or '--' }}</td>
+                  <td>
+                    {% if r.is_occupied %}
+                      {{ r.booking_from }} → {{ r.booking_to }}
+                    {% else %}
+                      --
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="7" style="text-align:center; padding:16px;">
+                    No rooms found.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="info-notice" style="margin-top:14px;">
+          <span class="info-icon">💡</span>
+          <div class="info-text">
+            Occupied rooms are highlighted. Bookings overlap rule:
+            <strong>booking_from &lt; selected_to</strong> and <strong>booking_to &gt; selected_from</strong>.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+{% endblock %}

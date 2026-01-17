@@ -238,6 +238,67 @@ CREATE TABLE stock_movement (
            (warehouse_id IS NULL AND branch_id IS NOT NULL))
 );
 
+
+CREATE TABLE room (
+  room_id INT AUTO_INCREMENT PRIMARY KEY,
+  room_number VARCHAR(20) NOT NULL UNIQUE,
+  room_type VARCHAR(30) DEFAULT 'Standard',
+  is_active TINYINT NOT NULL DEFAULT 1,
+  notes VARCHAR(255)
+);
+
+
+CREATE TABLE cat (
+  cat_id INT AUTO_INCREMENT PRIMARY KEY,
+  owner_id INT NOT NULL,
+  cat_name VARCHAR(80) NOT NULL,
+  breed VARCHAR(60),
+  age_years INT,
+  gender ENUM('M','F'),
+  medical_notes VARCHAR(400),
+  is_active TINYINT NOT NULL DEFAULT 1,
+  CONSTRAINT fk_cat_owner FOREIGN KEY (owner_id) REFERENCES users(user_id)
+);
+
+
+CREATE TABLE booking (
+  booking_id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  date_from DATE NOT NULL,
+  date_to DATE NOT NULL,
+  status ENUM('PENDING','CONFIRMED','CANCELLED','COMPLETED') NOT NULL DEFAULT 'PENDING',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by INT NOT NULL,
+  total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  CONSTRAINT fk_booking_customer FOREIGN KEY (customer_id) REFERENCES users(user_id),
+  CONSTRAINT fk_booking_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
+  CONSTRAINT chk_booking_dates CHECK (date_to > date_from)
+);
+
+
+
+CREATE TABLE booking_room (
+  booking_room_id INT AUTO_INCREMENT PRIMARY KEY,
+  booking_id INT NOT NULL,
+  room_id INT NOT NULL,
+  cat_id INT NOT NULL,
+  nights INT NOT NULL,
+  price_per_night DECIMAL(10,2) NOT NULL DEFAULT 30.00,
+  discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  line_total DECIMAL(10,2) NOT NULL,
+
+  CONSTRAINT fk_br_booking FOREIGN KEY (booking_id) REFERENCES booking(booking_id) ON DELETE CASCADE,
+  CONSTRAINT fk_br_room FOREIGN KEY (room_id) REFERENCES room(room_id),
+  CONSTRAINT fk_br_cat FOREIGN KEY (cat_id) REFERENCES cat(cat_id),
+
+  UNIQUE (booking_id, room_id),
+  UNIQUE (booking_id, cat_id)
+);
+
+
+
+
+
 -- =========================================================
 -- SAMPLE DATA
 -- =========================================================
@@ -293,5 +354,7 @@ INSERT INTO branch_stock (branch_id, product_id, on_hand_qty, min_qty) VALUES
 (1, 6, 12, 5),
 (1, 7, 6, 4),
 (1, 8, 1, 5);
+INSERT INTO room (room_number, room_type, is_active)
+VALUES ('R01','Standard',1),('R02','Standard',1),('R03','Standard',1),('R04','Standard',1),('R05','Standard',1);
 
 select * from users;

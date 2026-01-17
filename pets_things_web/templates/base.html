@@ -63,7 +63,21 @@
                 <li><a href="/purchases" class="navbar-link {% if '/purchases' in request.path %}active{% endif %}">Purchases</a></li>
                 {% endif %}
                 
+                <!-- Bookings dropdown for admin/employee -->
+                {% if session.get('role') in ['admin', 'employee'] %}
+                <li class="nav-dropdown">
+                    <a href="/bookings" class="navbar-link dropdown-trigger {% if '/bookings' in request.path %}active{% endif %}">
+                        Bookings
+                        <span class="dropdown-arrow">&#9662;</span>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a href="{{ url_for('bookings_today') }}" class="dropdown-link">📅 Today</a></li>
+                        <li><a href="{{ url_for('rooms_occupancy') }}" class="dropdown-link">🏨 Occupancy</a></li>
+                    </ul>
+                </li>
+                {% else %}
                 <li><a href="/bookings" class="navbar-link {% if request.path == '/bookings' %}active{% endif %}">Bookings</a></li>
+                {% endif %}
                 
                 <!-- Reports dropdown for admin/employee -->
                 {% if session.get('role') in ['admin', 'employee'] %}
