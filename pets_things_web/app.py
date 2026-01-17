@@ -2799,35 +2799,41 @@ def rooms_occupancy():
         # Fetch all rooms + any overlapping booking line (if exists)
         # Overlap: b.date_from < date_to AND b.date_to > date_from
         cur.execute("""
-            SELECT
-              r.room_id,
-              r.room_number,
-              r.room_type,
-              r.is_active,
+    SELECT
+      r.room_id,
+      r.room_number,
+      r.room_type,
+      r.is_active,
 
-              b.booking_id,
-              b.status AS booking_status,
-              b.date_from AS booking_from,
-              b.date_to AS booking_to,
-              u.full_name AS customer_name,
-              c.cat_name
+      x.booking_id,
+      x.booking_status,
+      x.booking_from,
+      x.booking_to,
+      x.customer_name,
+      x.cat_name
 
-            FROM room r
-            LEFT JOIN booking_room br
-              ON br.room_id = r.room_id
-            LEFT JOIN booking b
-              ON b.booking_id = br.booking_id
-             AND b.status IN ('PENDING','CONFIRMED')
-             AND b.date_from < %s
-             AND b.date_to   > %s
-            LEFT JOIN users u
-              ON u.user_id = b.customer_id
-            LEFT JOIN cat c
-              ON c.cat_id = br.cat_id
+    FROM room r
+    LEFT JOIN (
+      SELECT
+        br.room_id,
+        b.booking_id,
+        b.status AS booking_status,
+        b.date_from AS booking_from,
+        b.date_to AS booking_to,
+        u.full_name AS customer_name,
+        c.cat_name
+      FROM booking_room br
+      JOIN booking b ON b.booking_id = br.booking_id
+      JOIN users u ON u.user_id = b.customer_id
+      JOIN cat c ON c.cat_id = br.cat_id
+      WHERE b.status IN ('PENDING','CONFIRMED')
+        AND b.date_from < %s
+        AND b.date_to   > %s
+    ) x ON x.room_id = r.room_id
 
-            WHERE r.is_active = 1
-            ORDER BY r.room_number
-        """, (date_to, date_from))
+    WHERE r.is_active = 1
+    ORDER BY r.room_number
+""", (date_to, date_from))
 
         rows = cur.fetchall()
 
@@ -2849,6 +2855,75 @@ def rooms_occupancy():
                                date_from=date_from,
                                date_to=date_to,
                                error=error)
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+
+@app.route("/admin/occupancy-analytics")
+@role_required("admin", "employee")
+def occupancy_analytics():
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+
+    # Default: today -> tomorrow
+    if not date_from or not date_to:
+        from datetime import date, timedelta
+        df = date.today()
+        dt = df + timedelta(days=1)
+        date_from = df.strftime("%Y-%m-%d")
+        date_to = dt.strftime("%Y-%m-%d")
+
+    error = None
+    data = {"total_rooms": 0, "occupied_rooms": 0, "available_rooms": 0, "occupancy_rate": 0.0}
+
+    conn = get_connection()
+    if not conn:
+        return render_template("occupancy_analytics.html",
+                               date_from=date_from, date_to=date_to,
+                               data=data, error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Total rooms
+        cur.execute("SELECT COUNT(*) AS total_rooms FROM room WHERE is_active = 1")
+        total_rooms = int(cur.fetchone()["total_rooms"] or 0)
+
+        # Occupied rooms in the selected range (distinct rooms with overlapping booking)
+        cur.execute("""
+            SELECT COUNT(DISTINCT br.room_id) AS occupied_rooms
+            FROM booking_room br
+            JOIN booking b ON b.booking_id = br.booking_id
+            JOIN room r ON r.room_id = br.room_id
+            WHERE r.is_active = 1
+              AND b.status IN ('PENDING','CONFIRMED')
+              AND b.date_from < %s
+              AND b.date_to   > %s
+        """, (date_to, date_from))
+        occupied_rooms = int(cur.fetchone()["occupied_rooms"] or 0)
+
+        available_rooms = max(total_rooms - occupied_rooms, 0)
+        occupancy_rate = (occupied_rooms / total_rooms * 100.0) if total_rooms > 0 else 0.0
+
+        data = {
+            "total_rooms": total_rooms,
+            "occupied_rooms": occupied_rooms,
+            "available_rooms": available_rooms,
+            "occupancy_rate": occupancy_rate
+        }
+
+        return render_template("occupancy_analytics.html",
+                               date_from=date_from, date_to=date_to,
+                               data=data, error=None)
+
+    except Exception as e:
+        print("occupancy_analytics error:", e)
+        return render_template("occupancy_analytics.html",
+                               date_from=date_from, date_to=date_to,
+                               data=data, error="Error loading occupancy analytics")
     finally:
         try:
             cur.close()
