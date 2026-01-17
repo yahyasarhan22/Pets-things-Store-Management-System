@@ -263,14 +263,39 @@ def add_product():
                                        categories=categories,
                                        product=None)
 
-            cur.execute("""
-                INSERT INTO product (product_name, category_id, unit_price, description, is_active)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (name, category_id, unit_price, description, is_active))
-            conn.commit()
-
-            flash("Product added successfully.", "success")
-            return redirect(url_for("products"))
+            # Start transaction
+            try:
+                # 1) Insert product
+                cur.execute("""
+                    INSERT INTO product (product_name, category_id, unit_price, description, is_active)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (name, category_id, unit_price, description, is_active))
+                
+                # 2) Get the newly created product_id
+                product_id = cur.lastrowid
+                
+                # 3) Create stock rows for all branches
+                cur.execute("""
+                    INSERT INTO stock (branch_id, product_id, on_hand_qty, min_qty, last_restock_date)
+                    SELECT branch_id, %s, 0, 5, NULL
+                    FROM branch
+                """, (product_id,))
+                
+                # Commit transaction
+                conn.commit()
+                
+                flash(f"Product added successfully with stock initialized in {cur.rowcount} branches.", "success")
+                return redirect(url_for("products"))
+                
+            except Exception as e:
+                # Rollback on error
+                conn.rollback()
+                print(f"Transaction error: {e}")
+                flash("Failed to add product. Please try again.", "danger")
+                return render_template("product_form.html",
+                                       mode="add",
+                                       categories=categories,
+                                       product=None)
 
         return render_template("product_form.html",
                                mode="add",
@@ -1436,6 +1461,43 @@ def sales_analytics():
         conn.close()
 
 
+#Purchase
+@app.route("/purchases")
+@role_required("admin", "employee")
+def purchases_list():
+    # later: list view
+    return redirect(url_for("purchases_new"))
+
+@app.route("/purchases/new", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def purchases_new():
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+    branches = cur.fetchall()
+
+    if request.method == "POST":
+        branch_id = request.form.get("branch_id", type=int)
+        supplier_name = (request.form.get("supplier_name") or "").strip()
+        employee_id = session.get("user_id")
+
+        if not branch_id:
+            flash("Select a branch.", "warning")
+            return render_template("purchase_new.html", branches=branches)
+
+        cur2 = conn.cursor()
+        cur2.execute("""
+            INSERT INTO purchase (branch_id, employee_id, supplier_name, total_amount)
+            VALUES (%s, %s, %s, 0.00)
+        """, (branch_id, employee_id, supplier_name))
+        conn.commit()
+        purchase_id = cur2.lastrowid
+        cur2.close()
+
+        return redirect(url_for("purchase_detail", purchase_id=purchase_id))
+
+    return render_template("purchase_new.html", branches=branches)
 
 
 
