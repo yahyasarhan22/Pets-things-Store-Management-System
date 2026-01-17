@@ -280,6 +280,7 @@ def add_product():
     finally:
         cur.close()
         conn.close()
+
 ##########################
 @app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
 @role_required("admin", "employee")
@@ -877,6 +878,61 @@ def sale_detail(sale_id):
         cur.close()
         conn.close()
 
+@app.route("/sales/<int:sale_id>/receipt")
+@role_required("admin", "employee")
+def sale_receipt(sale_id):
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for("sales_list"))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Sale header
+        cur.execute("""
+            SELECT
+                s.sale_id,
+                s.sale_date,
+                s.total_amount,
+                b.branch_name,
+                e.full_name AS employee_name,
+                cu.full_name AS customer_name
+            FROM sale s
+            JOIN branch b ON s.branch_id = b.branch_id
+            JOIN users e ON s.employee_id = e.user_id
+            LEFT JOIN users cu ON s.customer_id = cu.user_id
+            WHERE s.sale_id = %s
+        """, (sale_id,))
+        sale = cur.fetchone()
+
+        if not sale:
+            flash("Sale not found.", "warning")
+            return redirect(url_for("sales_list"))
+
+        # Sale lines
+        cur.execute("""
+            SELECT
+                p.product_name,
+                sl.quantity,
+                sl.unit_price,
+                sl.line_total
+            FROM sale_line sl
+            JOIN product p ON sl.product_id = p.product_id
+            WHERE sl.sale_id = %s
+        """, (sale_id,))
+        items = cur.fetchall()
+
+        return render_template(
+            "sale_receipt.html",
+            sale=sale,
+            items=items
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.route("/sales/<int:sale_id>/add-item", methods=["POST"])
 @role_required("admin", "employee")
@@ -1265,6 +1321,125 @@ def report_top_products():
     finally:
         cur.close()
         conn.close()
+
+
+@app.route("/reports/sales-analytics")
+@role_required("admin", "employee")
+def sales_analytics():
+    conn = get_connection()
+    if not conn:
+        return render_template("sales_analytics.html",
+                               branches=[], error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        # Filters (GET params)
+        branch_id = request.args.get("branch_id", type=int)
+        date_from = (request.args.get("date_from") or "").strip()  # YYYY-MM-DD
+        date_to = (request.args.get("date_to") or "").strip()      # YYYY-MM-DD
+        group_by = (request.args.get("group_by") or "day").strip().lower()  # day|month
+        group_by = group_by if group_by in ("day", "month") else "day"
+
+        # Default date range if empty (last 30 days)
+        # (This keeps the page useful the first time you open it.)
+        if not date_to:
+            cur.execute("SELECT CURDATE() AS d")
+            date_to = str(cur.fetchone()["d"])
+        if not date_from:
+            cur.execute("SELECT DATE_SUB(%s, INTERVAL 30 DAY) AS d", (date_to,))
+            date_from = str(cur.fetchone()["d"])
+
+        # Branch dropdown
+        cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
+        branches = cur.fetchall()
+
+        # WHERE builder
+        conditions = ["DATE(s.sale_date) >= %s", "DATE(s.sale_date) <= %s"]
+        params = [date_from, date_to]
+
+        if branch_id:
+            conditions.append("s.branch_id = %s")
+            params.append(branch_id)
+
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+        # 1) KPI summary
+        cur.execute(f"""
+            SELECT
+                COUNT(*) AS sale_count,
+                COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                COALESCE(AVG(s.total_amount), 0) AS avg_sale
+            FROM sale s
+            {where_clause}
+        """, params)
+        summary = cur.fetchone()
+
+        # 2) Trend (daily/monthly)
+        if group_by == "month":
+            label_sql = "DATE_FORMAT(s.sale_date, '%Y-%m')"
+        else:
+            label_sql = "DATE(s.sale_date)"
+
+        cur.execute(f"""
+            SELECT
+                {label_sql} AS label,
+                COALESCE(SUM(s.total_amount), 0) AS revenue
+            FROM sale s
+            {where_clause}
+            GROUP BY label
+            ORDER BY label ASC
+        """, params)
+        trend_rows = cur.fetchall()
+
+        chart_labels = [str(r["label"]) for r in trend_rows]
+        chart_values = [float(r["revenue"]) for r in trend_rows]
+
+        # 3) Top categories
+        cur.execute(f"""
+            SELECT
+                c.category_name,
+                COALESCE(SUM(sl.quantity), 0) AS total_qty,
+                COALESCE(SUM(sl.line_total), 0) AS total_revenue
+            FROM sale_line sl
+            JOIN sale s      ON sl.sale_id = s.sale_id
+            JOIN product p   ON sl.product_id = p.product_id
+            JOIN category c  ON p.category_id = c.category_id
+            {where_clause}
+            GROUP BY c.category_name
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        """, params)
+        top_categories = cur.fetchall()
+
+        return render_template(
+            "sales_analytics.html",
+            branches=branches,
+            selected_branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+            group_by=group_by,
+            summary=summary,
+            chart_labels=chart_labels,
+            chart_values=chart_values,
+            top_categories=top_categories,
+            error=None
+        )
+
+    except Exception as e:
+        print("sales_analytics error:", e)
+        return render_template("sales_analytics.html",
+                               branches=[], error="Error loading analytics")
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+
+
+
 
 @app.route("/stock-movements")
 @role_required("admin", "employee")
