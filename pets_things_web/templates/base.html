@@ -29,7 +29,7 @@
 
             <!-- Navigation Links -->
             <ul class="navbar-menu" id="navbar-menu">
-                <!-- Products dropdown menu with hover functionality -->
+                <!-- Products dropdown -->
                 <li class="nav-dropdown">
                     <a href="/products" class="navbar-link dropdown-trigger {% if '/products' in request.path %}active{% endif %}">
                         Products
@@ -41,16 +41,31 @@
                     </ul>
                 </li>
                 
-                <!-- Inventory link for admin/employee only with LOW stock badge -->
+                <!-- Inventory dropdown for admin/employee -->
                 {% if session.get('role') in ['admin', 'employee'] %}
-                <li><a href="/inventory" class="navbar-link {% if request.path == '/inventory' %}active{% endif %}">Inventory{% if low_stock_count %} <span class="navbar-badge">LOW: {{ low_stock_count }}</span>{% endif %}</a></li>
+                <li class="nav-dropdown">
+                    <a href="/inventory" class="navbar-link dropdown-trigger {% if request.path == '/inventory' %}active{% endif %}">
+                        Inventory
+                        {% if low_stock_count %}<span class="navbar-badge">LOW: {{ low_stock_count }}</span>{% endif %}
+                        <span class="dropdown-arrow">&#9662;</span>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a href="/inventory?view=branch" class="dropdown-link">📦 Branch Inventory</a></li>
+                        <li><a href="/inventory?view=warehouse" class="dropdown-link">🏭 Warehouse Inventory</a></li>
+                    </ul>
+                </li>
                 {% endif %}
                 
                 <li><a href="/sales" class="navbar-link {% if request.path == '/sales' %}active{% endif %}">Sales</a></li>
-                <li><a href="/purchases" class="navbar-link {% if request.path == '/purchases' %}active{% endif %}">Purchases</a></li>
+                
+                <!-- Purchases link for admin/employee -->
+                {% if session.get('role') in ['admin', 'employee'] %}
+                <li><a href="/purchases" class="navbar-link {% if '/purchases' in request.path %}active{% endif %}">Purchases</a></li>
+                {% endif %}
+                
                 <li><a href="/bookings" class="navbar-link {% if request.path == '/bookings' %}active{% endif %}">Bookings</a></li>
                 
-                <!-- Reports dropdown menu for admin/employee only -->
+                <!-- Reports dropdown for admin/employee -->
                 {% if session.get('role') in ['admin', 'employee'] %}
                 <li class="nav-dropdown">
                     <a href="/reports" class="navbar-link dropdown-trigger {% if '/reports' in request.path %}active{% endif %}">
@@ -64,7 +79,7 @@
                 </li>
                 {% endif %}
 
-                <!-- Stock Movements link for admin/employee only -->
+                <!-- Stock Movements for admin/employee -->
                 {% if session.get('role') in ['admin', 'employee'] %}
                 <li><a href="/stock-movements" class="navbar-link {% if request.path == '/stock-movements' %}active{% endif %}">Stock Movements</a></li>
                 {% endif %}

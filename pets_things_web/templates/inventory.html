@@ -1,12 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Inventory - Pets & Things{% endblock %}
+{% block title %}{{ 'Warehouse' if view == 'warehouse' else 'Branch' }} Inventory - Pets & Things{% endblock %}
 
 {% block content %}
 
-{# -----------------------------
-   NEW: helper to toggle sorting direction
-   ----------------------------- #}
 {% macro next_dir(col) -%}
   {{ 'desc' if (sort == col and dir == 'asc') else 'asc' }}
 {%- endmacro %}
@@ -40,10 +37,10 @@
     </div>
 
     <div class="inv-card">
-      <div class="inv-card-icon">🏪</div>
+      <div class="inv-card-icon">{{ '🏭' if view == 'warehouse' else '🏪' }}</div>
       <div class="inv-card-content">
-        <div class="inv-card-label">Branches</div>
-        <div class="inv-card-value">{{ summary.unique_branches }}</div>
+        <div class="inv-card-label">{{ 'Warehouse' if view == 'warehouse' else 'Branch' }} View</div>
+        <div class="inv-card-value">{{ summary.unique_products }}</div>
       </div>
     </div>
   </div>
@@ -55,26 +52,43 @@
   <div class="page-header-content">
     <div class="page-title-section">
       <h1 class="page-title">
-        <span class="title-icon">📦</span>
-        Inventory
+        <span class="title-icon">{{ '🏭' if view == 'warehouse' else '📦' }}</span>
+        {{ 'Warehouse' if view == 'warehouse' else 'Branch' }} Inventory
       </h1>
-      <p class="page-subtitle">Monitor stock levels across all branches</p>
+      <p class="page-subtitle">{{ 'Central warehouse stock levels' if view == 'warehouse' else 'Monitor branch stock levels' }}</p>
     </div>
 
-    <!-- Filters -->
+    <!-- View Toggle + Filters -->
     <div class="header-actions">
-      <form method="GET" action="{{ request.path }}" class="filter-form">
-        <!-- Branch Filter -->
+      <form method="GET" action="{{ url_for('inventory') }}" class="filter-form">
+        <!-- View Selector -->
         <div class="filter-group">
-          <label for="branch_id" class="filter-label">Branch</label>
-          <select name="branch_id" id="branch_id" class="filter-select">
-            <option value="">All Branches</option>
-            {% for b in branches %}
-              <option value="{{ b.branch_id }}"
-                {% if selected_branch_id == b.branch_id %}selected{% endif %}>
-                {{ b.branch_name }}
-              </option>
-            {% endfor %}
+          <label for="view" class="filter-label">View</label>
+          <select name="view" id="view" class="filter-select" onchange="this.form.submit()">
+            <option value="branch" {% if view == 'branch' %}selected{% endif %}>🏪 Branch</option>
+            <option value="warehouse" {% if view == 'warehouse' %}selected{% endif %}>🏭 Warehouse</option>
+          </select>
+        </div>
+
+        <!-- Location Filter -->
+        <div class="filter-group">
+          <label for="location_id" class="filter-label">{{ 'Warehouse' if view == 'warehouse' else 'Branch' }}</label>
+          <select name="location_id" id="location_id" class="filter-select">
+            {% if view == 'warehouse' %}
+              <option value="">All Warehouses</option>
+              {% for w in warehouses %}
+                <option value="{{ w.warehouse_id }}" {% if selected_location_id == w.warehouse_id %}selected{% endif %}>
+                  {{ w.warehouse_name }}
+                </option>
+              {% endfor %}
+            {% else %}
+              <option value="">All Branches</option>
+              {% for b in branches %}
+                <option value="{{ b.branch_id }}" {% if selected_location_id == b.branch_id %}selected{% endif %}>
+                  {{ b.branch_name }}
+                </option>
+              {% endfor %}
+            {% endif %}
           </select>
         </div>
 
@@ -84,8 +98,7 @@
           <select name="category_id" id="category_id" class="filter-select">
             <option value="">All Categories</option>
             {% for c in categories %}
-              <option value="{{ c.category_id }}"
-                {% if selected_category_id == c.category_id %}selected{% endif %}>
+              <option value="{{ c.category_id }}" {% if selected_category_id == c.category_id %}selected{% endif %}>
                 {{ c.category_name }}
               </option>
             {% endfor %}
@@ -105,7 +118,7 @@
         <!-- Buttons -->
         <div class="filter-buttons">
           <button type="submit" class="filter-btn apply-btn">Apply</button>
-          <a href="{{ url_for('inventory') }}" class="filter-btn reset-btn">Reset</a>
+          <a href="{{ url_for('inventory', view=view) }}" class="filter-btn reset-btn">Reset</a>
         </div>
       </form>
     </div>
@@ -116,7 +129,6 @@
 <section class="inventory-section">
   <div class="inventory-container">
 
-    <!-- Error Alert -->
     {% if error %}
       <div class="alert error">
         <span class="error-icon">⚠️</span>
@@ -131,22 +143,20 @@
           <table class="inventory-table">
             <thead>
               <tr>
-
-                {# --------- NEW: Sortable headers (preserve filters + toggle dir) --------- #}
-
                 <th>
                   <a class="sort-link"
                      href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
+                                      view=view,
+                                      location_id=selected_location_id,
                                       category_id=selected_category_id,
                                       status=selected_status,
-                                      sort='branch_name',
-                                      dir=next_dir('branch_name'),
+                                      sort='location_name',
+                                      dir=next_dir('location_name'),
                                       page=1) }}">
                     <span class="th-content">
-                      <span class="th-icon">🏪</span>
-                      Branch
-                      {% if sort == 'branch_name' %}
+                      <span class="th-icon">{{ '🏭' if view == 'warehouse' else '🏪' }}</span>
+                      {{ 'Warehouse' if view == 'warehouse' else 'Branch' }}
+                      {% if sort == 'location_name' %}
                         <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
                       {% endif %}
                     </span>
@@ -156,7 +166,8 @@
                 <th>
                   <a class="sort-link"
                      href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
+                                      view=view,
+                                      location_id=selected_location_id,
                                       category_id=selected_category_id,
                                       status=selected_status,
                                       sort='product_name',
@@ -175,7 +186,8 @@
                 <th>
                   <a class="sort-link"
                      href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
+                                      view=view,
+                                      location_id=selected_location_id,
                                       category_id=selected_category_id,
                                       status=selected_status,
                                       sort='category_name',
@@ -194,7 +206,8 @@
                 <th>
                   <a class="sort-link"
                      href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
+                                      view=view,
+                                      location_id=selected_location_id,
                                       category_id=selected_category_id,
                                       status=selected_status,
                                       sort='on_hand_qty',
@@ -211,28 +224,17 @@
                 </th>
 
                 <th>
-                  <a class="sort-link"
-                     href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
-                                      category_id=selected_category_id,
-                                      status=selected_status,
-                                      sort='min_qty',
-                                      dir=next_dir('min_qty'),
-                                      page=1) }}">
-                    <span class="th-content">
-                      <span class="th-icon">⚠️</span>
-                      Min Qty
-                      {% if sort == 'min_qty' %}
-                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
-                      {% endif %}
-                    </span>
-                  </a>
+                  <span class="th-content">
+                    <span class="th-icon">⚠️</span>
+                    Min Qty
+                  </span>
                 </th>
 
                 <th>
                   <a class="sort-link"
                      href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
+                                      view=view,
+                                      location_id=selected_location_id,
                                       category_id=selected_category_id,
                                       status=selected_status,
                                       sort='status',
@@ -249,38 +251,28 @@
                 </th>
 
                 <th>
-                  <a class="sort-link"
-                     href="{{ url_for('inventory',
-                                      branch_id=selected_branch_id,
-                                      category_id=selected_category_id,
-                                      status=selected_status,
-                                      sort='last_restock_date',
-                                      dir=next_dir('last_restock_date'),
-                                      page=1) }}">
-                    <span class="th-content">
-                      <span class="th-icon">📅</span>
-                      Last Restock
-                      {% if sort == 'last_restock_date' %}
-                        <span class="sort-arrow">{{ '▲' if dir == 'asc' else '▼' }}</span>
-                      {% endif %}
-                    </span>
-                  </a>
+                  <span class="th-content">
+                    <span class="th-icon">📅</span>
+                    Last {{ 'Purchase' if view == 'warehouse' else 'Restock' }}
+                  </span>
                 </th>
 
-                <!-- Actions (not sortable) -->
+                <!-- Actions -->
+                {% if session.role in ['admin', 'employee'] %}
                 <th>
                   <span class="th-content">
                     <span class="th-icon">🛠️</span>
                     Actions
                   </span>
                 </th>
+                {% endif %}
               </tr>
             </thead>
 
             <tbody>
               {% for item in inventory %}
                 <tr class="{% if item.stock_status == 'LOW' %}row-low-stock{% endif %}">
-                  <td><span class="branch-name">{{ item.branch_name }}</span></td>
+                  <td><span class="branch-name">{{ item.location_name }}</span></td>
 
                   <td class="product-name-cell">
                     <span class="product-name">{{ item.product_name }}</span>
@@ -306,21 +298,23 @@
 
                   <td>
                     <span class="restock-date">
-                      {{ item.last_restock_date if item.last_restock_date else '—' }}
+                      {{ item.last_date if item.last_date else '—' }}
                     </span>
                   </td>
 
-                  <!-- Restock form -->
+                  <!-- Transfer/Restock form (only for branch view) -->
+                  {% if session.role in ['admin', 'employee'] %}
                   <td>
-                    {% if session.role in ['admin', 'employee'] %}
+                    {% if view == 'branch' %}
                       <form method="POST"
-                            action="{{ url_for('restock_inventory') }}"
+                            action="{{ url_for('transfer_stock') }}"
                             class="restock-form">
                         <input type="hidden" name="product_id" value="{{ item.product_id }}">
-                        <input type="hidden" name="branch_id" value="{{ item.branch_id }}">
+                        <input type="hidden" name="branch_id" value="{{ item.location_id }}">
+                        <input type="hidden" name="warehouse_id" value="1">
 
                         <input type="number"
-                               name="restock_qty"
+                               name="quantity"
                                min="1"
                                step="1"
                                placeholder="+Qty"
@@ -329,14 +323,15 @@
 
                         <button type="submit"
                                 class="restock-btn"
-                                onclick="return confirm('Restock this item?');">
-                          Restock
+                                onclick="return confirm('Transfer stock from warehouse to branch?');">
+                          Transfer
                         </button>
                       </form>
                     {% else %}
-                      —
+                      <span style="color: var(--text-secondary); font-size: 0.85rem;">Warehouse</span>
                     {% endif %}
                   </td>
+                  {% endif %}
                 </tr>
               {% endfor %}
             </tbody>
@@ -344,17 +339,14 @@
         </div>
       </div>
 
-      {# -----------------------------
-         NEW: Pagination (preserves filters + sort)
-         ----------------------------- #}
+      <!-- Pagination -->
       {% if total_pages > 1 %}
         <div class="pagination">
-
-          <!-- Prev -->
           {% if page > 1 %}
             <a class="page-btn"
                href="{{ url_for('inventory',
-                                branch_id=selected_branch_id,
+                                view=view,
+                                location_id=selected_location_id,
                                 category_id=selected_category_id,
                                 status=selected_status,
                                 sort=sort,
@@ -364,7 +356,6 @@
             <span class="page-btn disabled">Prev</span>
           {% endif %}
 
-          <!-- Page numbers -->
           {% set start = 1 if page-2 < 1 else page-2 %}
           {% set end = total_pages if page+2 > total_pages else page+2 %}
 
@@ -375,7 +366,8 @@
               {% else %}
                 <a class="page-number"
                    href="{{ url_for('inventory',
-                                    branch_id=selected_branch_id,
+                                    view=view,
+                                    location_id=selected_location_id,
                                     category_id=selected_category_id,
                                     status=selected_status,
                                     sort=sort,
@@ -385,11 +377,11 @@
             {% endfor %}
           </div>
 
-          <!-- Next -->
           {% if page < total_pages %}
             <a class="page-btn"
                href="{{ url_for('inventory',
-                                branch_id=selected_branch_id,
+                                view=view,
+                                location_id=selected_location_id,
                                 category_id=selected_category_id,
                                 status=selected_status,
                                 sort=sort,

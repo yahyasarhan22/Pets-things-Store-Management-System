@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Purchase #{{ purchase.purchase_id }} - Pets & Things{% endblock %}
+
+{% block content %}
+
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">📦</span>
+        Purchase #{{ purchase.purchase_id }}
+      </h1>
+      <p class="page-subtitle">
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+          <span>🏭</span>
+          <strong>{{ purchase.warehouse_name }}</strong>
+        </span>
+        <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">
+          <span>🏢</span>
+          <strong>{{ purchase.supplier_name }}</strong>
+        </span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-container">
+
+    {% if error %}
+      <div class="alert error" style="margin-bottom: 20px;">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <!-- Add Item Card -->
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.6rem;">➕</span>
+          <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Add Item to Purchase</h2>
+        </div>
+
+        <form method="POST"
+              action="{{ url_for('purchase_add_item', purchase_id=purchase.purchase_id) }}"
+              style="display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 16px; align-items: flex-end;">
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="product_id">
+              <span style="color: var(--error-color);">*</span> Product
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">📦</span>
+              <select name="product_id" id="product_id" class="form-input" required style="padding-left: 40px; width: 100%;">
+                <option value="">Select a product</option>
+                {% for p in products %}
+                  <option value="{{ p.product_id }}">{{ p.product_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="quantity">
+              <span style="color: var(--error-color);">*</span> Quantity
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🔢</span>
+              <input type="number"
+                     name="quantity"
+                     id="quantity"
+                     min="1"
+                     step="1"
+                     class="form-input"
+                     placeholder="Qty"
+                     required
+                     style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="unit_cost">
+              <span style="color: var(--error-color);">*</span> Unit Cost ($)
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">💰</span>
+              <input type="number"
+                     name="unit_cost"
+                     id="unit_cost"
+                     min="0"
+                     step="0.01"
+                     class="form-input"
+                     placeholder="Cost"
+                     required
+                     style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" style="padding: 12px 24px; white-space: nowrap; height: fit-content;">
+            ➕ Add
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Purchase Items -->
+    {% if lines and lines|length > 0 %}
+      <div class="form-card" style="max-width: 100%; margin-top: 28px;">
+        <div style="padding: 30px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+            <span style="font-size: 1.6rem;">📄</span>
+            <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Purchase Items</h2>
+            <span style="margin-left: auto; font-size: 0.95rem; color: var(--text-secondary); font-weight: 500;">{{ lines|length }} item(s)</span>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="inventory-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Product</th>
+                  <th style="text-align: right;">Unit Cost</th>
+                  <th style="text-align: center;">Quantity</th>
+                  <th style="text-align: right;">Line Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for line in lines %}
+                  <tr>
+                    <td><strong>{{ line.product_name }}</strong></td>
+                    <td style="text-align: right;">${{ "%.2f"|format(line.unit_cost) }}</td>
+                    <td style="text-align: center;">{{ line.quantity }}</td>
+                    <td style="text-align: right;"><strong>${{ "%.2f"|format(line.line_total) }}</strong></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Purchase Summary -->
+      <div class="form-card" style="max-width: 100%; margin-top: 28px; background: linear-gradient(135deg, #fff5eb 0%, #ffe4c9 100%);">
+        <div style="padding: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <p style="font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 8px;">Purchase Total</p>
+              <h2 style="margin: 0; font-size: 2.2rem; font-weight: 700; color: var(--primary-color);">
+                ${{ "%.2f"|format(computed_total) }}
+              </h2>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <form method="POST" action="{{ url_for('purchase_complete', purchase_id=purchase.purchase_id) }}">
+                <button type="submit"
+                        class="btn-primary"
+                        style="padding: 14px 28px; font-size: 1rem;"
+                        onclick="return confirm('Complete this purchase? Warehouse stock will be updated.');">
+                  ✅ Complete Purchase
+                </button>
+              </form>
+
+              <a href="{{ url_for('purchases_list') }}" class="btn-secondary" style="padding: 14px 28px; font-size: 1rem; display: inline-flex; align-items: center; gap: 8px; text-decoration: none;">
+                ← Back to List
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    {% else %}
+      <div class="empty-state" style="padding: 60px 40px;">
+        <div class="empty-icon">📦</div>
+        <h2 class="empty-title">No Items Added Yet</h2>
+        <p class="empty-text">Use the form above to add products to this purchase.</p>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+
+{% endblock %}

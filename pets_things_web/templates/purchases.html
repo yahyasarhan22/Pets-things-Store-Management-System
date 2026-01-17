@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Purchases - Pets & Things{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">📦</span>
+        Purchases
+      </h1>
+      <p class="page-subtitle">Manage supplier purchases to warehouse</p>
+    </div>
+
+    <div class="header-actions">
+      <a href="{{ url_for('purchase_new') }}" class="btn-primary">
+        <span class="btn-icon">+</span>
+        New Purchase
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Filters Section -->
+<section class="inventory-section">
+  <div class="inventory-container">
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.6rem;">🔍</span>
+          <h2 style="margin: 0; font-size: 1.3rem; font-weight: 600; color: var(--text-primary);">Filter Purchases</h2>
+        </div>
+
+        <form method="GET" action="{{ request.path }}" style="display: grid; grid-template-columns: 1.5fr 1fr 1fr 0.8fr 0.8fr; gap: 16px; align-items: flex-end;">
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="warehouse_id">🏭 Warehouse</label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏭</span>
+              <select class="form-input" id="warehouse_id" name="warehouse_id" style="padding-left: 40px; width: 100%;">
+                <option value="">All Warehouses</option>
+                {% for w in warehouses %}
+                  <option value="{{ w.warehouse_id }}" {% if selected_warehouse_id == w.warehouse_id %}selected{% endif %}>
+                    {{ w.warehouse_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="date_from">📅 From</label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" id="date_from" name="date_from" value="{{ date_from }}" style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="date_to">📅 To</label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input class="form-input" type="date" id="date_to" name="date_to" value="{{ date_to }}" style="padding-left: 40px; width: 100%;">
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" style="padding: 12px 20px; white-space: nowrap; height: fit-content;">
+            ✅ Apply
+          </button>
+
+          <a href="{{ url_for('purchases_list') }}" class="btn-secondary" style="padding: 12px 20px; white-space: nowrap; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; height: fit-content;">
+            🔄 Reset
+          </a>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Purchases Table -->
+<section class="inventory-section" style="padding-top: 20px;">
+  <div class="inventory-container">
+    
+    {% if error %}
+      <div class="alert error" style="margin-bottom: 20px;">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if purchases and purchases|length > 0 %}
+      <div class="table-card">
+        <div class="table-wrapper">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th style="text-align: left;">Purchase #</th>
+                <th style="text-align: left;">Date</th>
+                <th style="text-align: left;">Warehouse</th>
+                <th style="text-align: left;">Supplier</th>
+                <th style="text-align: left;">Performed By</th>
+                <th style="text-align: right;">Total Amount</th>
+                <th style="text-align: center;">View</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in purchases %}
+                <tr>
+                  <td><strong style="color: var(--primary-color);">#{{ p.purchase_id }}</strong></td>
+                  <td>{{ p.purchase_date }}</td>
+                  <td><span class="category-badge">{{ p.warehouse_name }}</span></td>
+                  <td>{{ p.supplier_name }}</td>
+                  <td>{{ p.performed_by_name }}</td>
+                  <td style="text-align: right;"><strong>${{ "%.2f"|format(p.total_amount) }}</strong></td>
+                  <td style="text-align: center;">
+                    <a class="btn-primary" 
+                       style="padding: 6px 12px; font-size: 0.8rem; text-decoration: none; display: inline-block; border-radius: 6px;"
+                       href="{{ url_for('purchase_detail', purchase_id=p.purchase_id) }}">
+                       View
+                    </a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">📦</div>
+        <h2 class="empty-title">No Purchases Found</h2>
+        <p class="empty-text">No purchases have been created yet. Start by creating a new purchase.</p>
+        <a href="{{ url_for('purchase_new') }}" class="btn-primary" style="margin-top: 24px; display: inline-block;">
+          ➕ Create New Purchase
+        </a>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+
+{% endblock %}

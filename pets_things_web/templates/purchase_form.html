@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}New Purchase - Pets & Things{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title"><span class="title-icon">📦</span>New Purchase</h1>
+      <p class="page-subtitle">Create a new purchase from supplier to warehouse</p>
+    </div>
+  </div>
+</section>
+
+<section class="form-section">
+  <div class="form-container">
+    <div class="form-card" style="max-width: 100%;">
+      <div style="padding: 30px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 2px solid var(--border-color);">
+          <span style="font-size: 1.8rem;">📋</span>
+          <h2 style="margin: 0; font-size: 1.4rem; font-weight: 600; color: var(--text-primary);">Purchase Information</h2>
+        </div>
+
+        {% if error %}
+          <div class="alert error" style="margin-bottom: 20px;">
+            <span class="error-icon">⚠️</span>
+            {{ error }}
+          </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('purchase_new') }}">
+          <!-- Warehouse Selection -->
+          <div class="form-group">
+            <label class="form-label" for="warehouse_id">
+              <span style="color: var(--error-color);">*</span> Warehouse
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏭</span>
+              <select class="form-input" id="warehouse_id" name="warehouse_id" required style="padding-left: 40px;">
+                <option value="">Select warehouse</option>
+                {% for w in warehouses %}
+                  <option value="{{ w.warehouse_id }}" {% if selected_warehouse_id == w.warehouse_id %}selected{% endif %}>
+                    {{ w.warehouse_name }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Select the warehouse receiving this purchase</p>
+          </div>
+
+          <!-- Supplier Name -->
+          <div class="form-group">
+            <label class="form-label" for="supplier_name">
+              <span style="color: var(--error-color);">*</span> Supplier Name
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏢</span>
+              <input type="text" 
+                     class="form-input" 
+                     id="supplier_name" 
+                     name="supplier_name" 
+                     placeholder="Enter supplier name"
+                     value="{{ supplier_name }}"
+                     required
+                     style="padding-left: 40px;">
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Enter the name of the supplier</p>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="form-actions" style="margin-top: 32px; display: flex; gap: 12px;">
+            <button type="submit" class="btn-primary" style="flex: 1;">
+              <span>✅</span> Start Purchase
+            </button>
+            <a href="{{ url_for('purchases_list') }}" class="btn-secondary" style="flex: 1; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <span>❌</span> Cancel
+            </a>
+          </div>
+        </form>
+
+        <div class="info-notice" style="margin-top: 24px;">
+          <span class="info-icon">ℹ️</span>
+          <div class="info-text">
+            <strong>Quick Tip:</strong> After creating the purchase, you'll be able to add items and complete the transaction.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -9,24 +9,45 @@
         <span class="title-icon">🧾</span>
         Stock Movements
       </h1>
-      <p class="page-subtitle">Audit log of inventory changes (restocks + sales)</p>
+      <p class="page-subtitle">Complete audit trail of all inventory changes</p>
     </div>
 
     <div class="header-actions">
       <form method="GET" action="{{ request.path }}" class="filter-form">
 
+        <!-- Location Type -->
         <div class="filter-group">
-          <label class="filter-label" for="branch_id">Branch</label>
-          <select class="filter-select" id="branch_id" name="branch_id">
-            <option value="">All Branches</option>
-            {% for b in branches %}
-              <option value="{{ b.branch_id }}" {% if selected_branch_id == b.branch_id %}selected{% endif %}>
-                {{ b.branch_name }}
-              </option>
-            {% endfor %}
+          <label class="filter-label" for="location_type">Location</label>
+          <select class="filter-select" id="location_type" name="location_type">
+            <option value="" {% if selected_location_type == "" %}selected{% endif %}>All</option>
+            <option value="branch" {% if selected_location_type == "branch" %}selected{% endif %}>🏪 Branch</option>
+            <option value="warehouse" {% if selected_location_type == "warehouse" %}selected{% endif %}>🏭 Warehouse</option>
           </select>
         </div>
 
+        <!-- Specific Location -->
+        <div class="filter-group">
+          <label class="filter-label" for="location_id">Specific</label>
+          <select class="filter-select" id="location_id" name="location_id">
+            <option value="">All Locations</option>
+            <optgroup label="Branches">
+              {% for b in branches %}
+                <option value="{{ b.branch_id }}" {% if selected_location_id == b.branch_id and selected_location_type == 'branch' %}selected{% endif %}>
+                  🏪 {{ b.branch_name }}
+                </option>
+              {% endfor %}
+            </optgroup>
+            <optgroup label="Warehouses">
+              {% for w in warehouses %}
+                <option value="{{ w.warehouse_id }}" {% if selected_location_id == w.warehouse_id and selected_location_type == 'warehouse' %}selected{% endif %}>
+                  🏭 {{ w.warehouse_name }}
+                </option>
+              {% endfor %}
+            </optgroup>
+          </select>
+        </div>
+
+        <!-- Product -->
         <div class="filter-group">
           <label class="filter-label" for="product_id">Product</label>
           <select class="filter-select" id="product_id" name="product_id">
@@ -39,20 +60,25 @@
           </select>
         </div>
 
+        <!-- Movement Type -->
         <div class="filter-group">
           <label class="filter-label" for="type">Type</label>
           <select class="filter-select" id="type" name="type">
-            <option value="" {% if selected_type == "" %}selected{% endif %}>All</option>
-            <option value="RESTOCK" {% if selected_type == "RESTOCK" %}selected{% endif %}>RESTOCK</option>
-            <option value="SALE" {% if selected_type == "SALE" %}selected{% endif %}>SALE</option>
+            <option value="" {% if selected_type == "" %}selected{% endif %}>All Types</option>
+            <option value="PURCHASE" {% if selected_type == "PURCHASE" %}selected{% endif %}>📦 PURCHASE</option>
+            <option value="SALE" {% if selected_type == "SALE" %}selected{% endif %}>💳 SALE</option>
+            <option value="TRANSFER_IN" {% if selected_type == "TRANSFER_IN" %}selected{% endif %}>⬇️ TRANSFER IN</option>
+            <option value="TRANSFER_OUT" {% if selected_type == "TRANSFER_OUT" %}selected{% endif %}>⬆️ TRANSFER OUT</option>
           </select>
         </div>
 
+        <!-- Date From -->
         <div class="filter-group">
           <label class="filter-label" for="date_from">From</label>
           <input class="filter-select" type="date" id="date_from" name="date_from" value="{{ date_from }}">
         </div>
 
+        <!-- Date To -->
         <div class="filter-group">
           <label class="filter-label" for="date_to">To</label>
           <input class="filter-select" type="date" id="date_to" name="date_to" value="{{ date_to }}">
@@ -84,14 +110,14 @@
           <table class="inventory-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Branch</th>
-                <th>Product</th>
-                <th>Change</th>
-                <th>Sale Ref</th>
-                <th>By</th>
+                <th style="min-width: 80px;">ID</th>
+                <th style="min-width: 160px;">Date & Time</th>
+                <th style="min-width: 120px;">Type</th>
+                <th style="min-width: 150px;">Location</th>
+                <th style="min-width: 200px;">Product</th>
+                <th style="text-align: center; min-width: 100px;">Change</th>
+                <th style="min-width: 100px;">Reference</th>
+                <th style="min-width: 140px;">Performed By</th>
               </tr>
             </thead>
             <tbody>
@@ -101,27 +127,41 @@
                   <td>{{ r.movement_date }}</td>
 
                   <td>
-                    {% if r.movement_type == "RESTOCK" %}
-                      <span class="stock-badge stock-ok">RESTOCK</span>
-                    {% else %}
-                      <span class="stock-badge stock-low">SALE</span>
+                    {% if r.movement_type == "PURCHASE" %}
+                      <span class="stock-badge stock-ok">📦 PURCHASE</span>
+                    {% elif r.movement_type == "SALE" %}
+                      <span class="stock-badge stock-low">💳 SALE</span>
+                    {% elif r.movement_type == "TRANSFER_IN" %}
+                      <span class="stock-badge" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; border: 1px solid rgba(21, 101, 192, 0.2);">⬇️ IN</span>
+                    {% elif r.movement_type == "TRANSFER_OUT" %}
+                      <span class="stock-badge" style="background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); color: #e65100; border: 1px solid rgba(230, 81, 0, 0.2);">⬆️ OUT</span>
                     {% endif %}
                   </td>
 
-                  <td>{{ r.branch_name }}</td>
-                  <td>{{ r.product_name }}</td>
+                  <td>{{ r.location_name }}</td>
+                  <td><strong>{{ r.product_name }}</strong></td>
 
-                  <td>
+                  <td style="text-align: center;">
                     {% if r.change_qty >= 0 %}
-                      <strong>+{{ r.change_qty }}</strong>
+                      <strong style="color: var(--success-color);">+{{ r.change_qty }}</strong>
                     {% else %}
-                      <strong>{{ r.change_qty }}</strong>
+                      <strong style="color: var(--error-color);">{{ r.change_qty }}</strong>
                     {% endif %}
                   </td>
 
                   <td>
                     {% if r.reference_sale_id %}
-                      <a href="{{ url_for('sale_detail', sale_id=r.reference_sale_id) }}">#{{ r.reference_sale_id }}</a>
+                      <a href="{{ url_for('sale_detail', sale_id=r.reference_sale_id) }}" 
+                         style="color: var(--primary-color); text-decoration: none; font-weight: 500;">
+                        Sale #{{ r.reference_sale_id }}
+                      </a>
+                    {% elif r.reference_purchase_id %}
+                      <a href="{{ url_for('purchase_detail', purchase_id=r.reference_purchase_id) }}"
+                         style="color: var(--primary-color); text-decoration: none; font-weight: 500;">
+                        Purchase #{{ r.reference_purchase_id }}
+                      </a>
+                    {% elif r.reference_transfer_id %}
+                      <span style="color: var(--text-secondary);">Transfer #{{ r.reference_transfer_id }}</span>
                     {% else %}
                       —
                     {% endif %}
@@ -134,11 +174,23 @@
           </table>
         </div>
       </div>
+
+      <!-- Info Box -->
+      <div class="info-notice" style="margin-top: 20px;">
+        <span class="info-icon">ℹ️</span>
+        <div class="info-text">
+          <strong>Movement Types:</strong> 
+          PURCHASE adds to warehouse, 
+          SALE removes from branch, 
+          TRANSFER moves stock from warehouse to branch (IN at branch, OUT at warehouse).
+        </div>
+      </div>
+
     {% else %}
       <div class="empty-state">
         <div class="empty-icon">🧾</div>
         <h2 class="empty-title">No movements found</h2>
-        <p class="empty-text">Try changing filters or perform a restock/sale.</p>
+        <p class="empty-text">Try changing filters or perform a purchase/sale/transfer.</p>
       </div>
     {% endif %}
 
