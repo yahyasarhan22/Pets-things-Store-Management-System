@@ -38,7 +38,8 @@
             </div>
             {% endif %}
 
-            <form method="POST" class="product-form">
+            <!-- ✅ IMPORTANT: multipart for file upload -->
+            <form method="POST" class="product-form" enctype="multipart/form-data">
                 <!-- Product Name -->
                 <div class="form-group">
                     <label for="product_name" class="form-label">Product Name</label>
@@ -105,6 +106,37 @@
                             rows="4"
                         >{{ product.description if product else '' }}</textarea>
                     </div>
+                </div>
+
+                <!-- ✅ Product Image -->
+                <div class="form-group">
+                    <label for="product_image" class="form-label">Product Image</label>
+
+                    {% if product and product.product_image %}
+                        <div style="margin-bottom:10px;">
+                            <img 
+                                src="{{ url_for('static', filename=product.product_image) }}"
+                                alt="Product Image"
+                                style="width:120px; height:120px; object-fit:cover; border-radius:12px; border:1px solid var(--border-color);"
+                            >
+                        </div>
+                    {% endif %}
+
+                    <div class="input-wrapper">
+                        <span class="input-icon">🖼️</span>
+                        <input
+                            type="file"
+                            id="product_image"
+                            name="product_image"
+                            class="form-input"
+                            accept=".png,.jpg,.jpeg,.webp"
+                            style="padding-left:40px;"
+                        >
+                    </div>
+
+                    <small style="color: var(--text-secondary); display:block; margin-top:6px;">
+                        Allowed: PNG / JPG / JPEG / WEBP (Optional)
+                    </small>
                 </div>
 
                 <!-- Status -->

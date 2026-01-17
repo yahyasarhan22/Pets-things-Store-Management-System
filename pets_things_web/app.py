@@ -6,11 +6,21 @@ from dotenv import load_dotenv
 import os
 import re
 from db import get_user_by_email, create_user, email_exists
+from werkzeug.utils import secure_filename
+import time
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads", "products")
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # ==================== DECORATORS ====================
@@ -93,6 +103,7 @@ def products():
                 c.category_name,
                 p.unit_price,
                 p.description,
+                p.product_image,
                 p.is_active,
                 p.category_id
             FROM product p
@@ -184,6 +195,7 @@ def active_products():
                 c.category_name,
                 p.unit_price,
                 p.description,
+                p.product_image,
                 p.is_active,
                 p.category_id
             FROM product p
@@ -241,9 +253,9 @@ def add_product():
         flash("DB connection failed.", "danger")
         return redirect(url_for("products"))
 
-    try:
-        cur = conn.cursor(dictionary=True)
+    cur = conn.cursor(dictionary=True)
 
+    try:
         # Get categories for dropdown
         cur.execute("SELECT category_id, category_name FROM category ORDER BY category_name")
         categories = cur.fetchall()
@@ -255,6 +267,26 @@ def add_product():
             description = (request.form.get("description") or "").strip()
             is_active = 1 if request.form.get("is_active") == "1" else 0
 
+            # ✅ Handle image upload
+            image_file = request.files.get("product_image")
+            image_path = None
+
+            if image_file and image_file.filename:
+                if not allowed_file(image_file.filename):
+                    flash("Image must be png/jpg/jpeg/webp.", "warning")
+                    return render_template("product_form.html",
+                                           mode="add",
+                                           categories=categories,
+                                           product=None)
+
+                filename = secure_filename(image_file.filename)
+                filename = f"{int(time.time())}_{filename}"
+                save_path = os.path.join(UPLOAD_FOLDER, filename)
+                image_file.save(save_path)
+
+                # store relative path for url_for('static', filename=...)
+                image_path = f"uploads/products/{filename}"
+
             if not name or not category_id or unit_price is None:
                 flash("Please fill name, category, and price.", "warning")
                 return render_template("product_form.html",
@@ -263,40 +295,46 @@ def add_product():
                                        product=None)
 
             try:
-                # Start transaction
+                # ✅ Start transaction (same as yours)
                 cur.execute("""
-                    INSERT INTO product (product_name, category_id, unit_price, description, is_active)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (name, category_id, unit_price, description, is_active))
-                
+                    INSERT INTO product (product_name, category_id, unit_price, description, is_active, product_image)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (name, category_id, unit_price, description, is_active, image_path))
+
                 product_id = cur.lastrowid
-                
+
                 # Create warehouse stock rows for all warehouses
                 cur.execute("""
                     INSERT INTO warehouse_stock (warehouse_id, product_id, on_hand_qty, min_qty, last_purchase_date)
                     SELECT warehouse_id, %s, 0, 10, NULL
                     FROM warehouse
                 """, (product_id,))
-                
                 warehouse_rows = cur.rowcount
-                
+
                 # Create branch stock rows for all branches
                 cur.execute("""
                     INSERT INTO branch_stock (branch_id, product_id, on_hand_qty, min_qty, last_restock_date)
                     SELECT branch_id, %s, 0, 5, NULL
                     FROM branch
                 """, (product_id,))
-                
                 branch_rows = cur.rowcount
-                
+
                 conn.commit()
-                
+
                 flash(f"Product added with stock initialized in {warehouse_rows} warehouse(s) and {branch_rows} branch(es).", "success")
                 return redirect(url_for("products"))
-                
+
             except Exception as e:
                 conn.rollback()
                 print(f"Transaction error: {e}")
+
+                # If DB failed after saving image, you can optionally delete file
+                if image_path:
+                    try:
+                        os.remove(os.path.join("static", image_path))
+                    except:
+                        pass
+
                 flash("Failed to add product. Please try again.", "danger")
                 return render_template("product_form.html",
                                        mode="add",
@@ -312,6 +350,7 @@ def add_product():
         cur.close()
         conn.close()
 
+
 ##########################
 @app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
 @role_required("admin", "employee")
@@ -321,9 +360,9 @@ def edit_product(product_id):
         flash("DB connection failed.", "danger")
         return redirect(url_for("products"))
 
-    try:
-        cur = conn.cursor(dictionary=True)
+    cur = conn.cursor(dictionary=True)
 
+    try:
         # get product
         cur.execute("SELECT * FROM product WHERE product_id = %s", (product_id,))
         product = cur.fetchone()
@@ -342,6 +381,33 @@ def edit_product(product_id):
             description = (request.form.get("description") or "").strip()
             is_active = 1 if request.form.get("is_active") == "1" else 0
 
+            # ✅ Handle optional new image
+            image_file = request.files.get("product_image")
+            new_image_path = product.get("product_image")  # default keep old
+
+            if image_file and image_file.filename:
+                if not allowed_file(image_file.filename):
+                    flash("Image must be png/jpg/jpeg/webp.", "warning")
+                    return render_template("product_form.html",
+                                           mode="edit",
+                                           categories=categories,
+                                           product=product)
+
+                filename = secure_filename(image_file.filename)
+                filename = f"{int(time.time())}_{filename}"
+                save_path = os.path.join(UPLOAD_FOLDER, filename)
+                image_file.save(save_path)
+
+                new_image_path = f"uploads/products/{filename}"
+
+                # Optional: delete old image file if it exists
+                old_path = product.get("product_image")
+                if old_path:
+                    try:
+                        os.remove(os.path.join("static", old_path))
+                    except:
+                        pass
+
             if not name or not category_id or unit_price is None:
                 flash("Please fill name, category, and price.", "warning")
                 return render_template("product_form.html",
@@ -349,19 +415,38 @@ def edit_product(product_id):
                                        categories=categories,
                                        product=product)
 
-            cur.execute("""
-                UPDATE product
-                SET product_name = %s,
-                    category_id = %s,
-                    unit_price = %s,
-                    description = %s,
-                    is_active = %s
-                WHERE product_id = %s
-            """, (name, category_id, unit_price, description, is_active, product_id))
-            conn.commit()
+            try:
+                cur.execute("""
+                    UPDATE product
+                    SET product_name = %s,
+                        category_id = %s,
+                        unit_price = %s,
+                        description = %s,
+                        is_active = %s,
+                        product_image = %s
+                    WHERE product_id = %s
+                """, (name, category_id, unit_price, description, is_active, new_image_path, product_id))
+                conn.commit()
 
-            flash("Product updated successfully.", "success")
-            return redirect(url_for("products"))
+                flash("Product updated successfully.", "success")
+                return redirect(url_for("products"))
+
+            except Exception as e:
+                conn.rollback()
+                print("edit_product error:", e)
+
+                # If update failed after uploading a new image, remove the new file
+                if image_file and image_file.filename and new_image_path:
+                    try:
+                        os.remove(os.path.join("static", new_image_path))
+                    except:
+                        pass
+
+                flash("Failed to update product. Please try again.", "danger")
+                return render_template("product_form.html",
+                                       mode="edit",
+                                       categories=categories,
+                                       product=product)
 
         return render_template("product_form.html",
                                mode="edit",
@@ -371,6 +456,7 @@ def edit_product(product_id):
     finally:
         cur.close()
         conn.close()
+
 ############
 @app.route("/products/<int:product_id>/delete", methods=["POST"])
 @role_required("admin", "employee")
