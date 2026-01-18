@@ -1,13 +1,9 @@
--- =========================================================
--- UPDATED DATABASE SCHEMA FOR WAREHOUSE + BRANCH INVENTORY
--- =========================================================
-
 DROP DATABASE IF EXISTS pets_things_db;
 CREATE DATABASE pets_things_db;
 USE pets_things_db;
 
 -- =========================================================
--- EXISTING TABLES (users, category, product, branch)
+-- Creating TABLES 
 -- =========================================================
 
 CREATE TABLE users (
@@ -26,9 +22,7 @@ CREATE TABLE employee (
     hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
--- 1) employee_attendance
 -- Remove derived attributes
--- =========================
 ALTER TABLE employee_attendance
   DROP COLUMN hours_worked,
   DROP COLUMN daily_salary;
@@ -44,8 +38,6 @@ CREATE TABLE employee_attendance (
     UNIQUE KEY uniq_user_date (user_id, work_date),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
-
-
 
 
 CREATE TABLE category (
@@ -76,9 +68,6 @@ CREATE TABLE branch (
   phone VARCHAR(30)
 );
 
--- =========================================================
--- NEW: WAREHOUSE TABLE
--- =========================================================
 CREATE TABLE warehouse (
   warehouse_id INT AUTO_INCREMENT PRIMARY KEY,
   warehouse_name VARCHAR(80) NOT NULL UNIQUE,
@@ -88,11 +77,6 @@ CREATE TABLE warehouse (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- =========================================================
--- UPDATED: SEPARATE BRANCH AND WAREHOUSE STOCK
--- =========================================================
-
--- Branch stock (for sales)
 CREATE TABLE branch_stock (
   branch_id INT NOT NULL,
   product_id INT NOT NULL,
@@ -112,7 +96,6 @@ CREATE TABLE branch_stock (
     ON DELETE CASCADE
 );
 
--- Warehouse stock (receives purchases)
 CREATE TABLE warehouse_stock (
   warehouse_id INT NOT NULL,
   product_id INT NOT NULL,
@@ -132,9 +115,6 @@ CREATE TABLE warehouse_stock (
     ON DELETE CASCADE
 );
 
--- =========================================================
--- SALES (unchanged logic, uses branch_stock)
--- =========================================================
 CREATE TABLE sale (
   sale_id INT AUTO_INCREMENT PRIMARY KEY,
   branch_id INT NOT NULL,
@@ -150,10 +130,8 @@ CREATE TABLE sale (
   CONSTRAINT fk_sale_customer
     FOREIGN KEY (customer_id) REFERENCES users(user_id)
 );
--- =========================
--- 3) sale
+
 -- Remove derived attribute
--- =========================
 ALTER TABLE sale
   DROP COLUMN total_amount;
 
@@ -172,15 +150,10 @@ CREATE TABLE sale_line (
   CONSTRAINT chk_sale_line_qty
     CHECK (quantity > 0)
 );
--- =========================
--- 2) sale_line
 -- Remove derived attribute
--- =========================
 ALTER TABLE sale_line
   DROP COLUMN line_total;
--- =========================================================
--- NEW: PURCHASES (supplier → warehouse)
--- =========================================================
+  
 CREATE TABLE purchase (
   purchase_id INT AUTO_INCREMENT PRIMARY KEY,
   warehouse_id INT NOT NULL,
@@ -196,20 +169,13 @@ CREATE TABLE purchase (
 );
 ALTER TABLE purchase
 ADD COLUMN supplier_id INT NULL;
--- =========================
--- 4) purchase
+
 -- Remove derived attributes (and redundancy)
 -- total_amount is derivable from purchase_line
 -- supplier_name is redundant if supplier_id is used
--- =========================
 ALTER TABLE purchase
   DROP COLUMN total_amount,
   DROP COLUMN supplier_name;
-
--- Optional but recommended for strict design:
--- enforce supplier_id always exists
--- (Only do this if your data already has supplier_id populated for all purchases)
--- ALTER TABLE purchase MODIFY supplier_id INT NOT NULL;
 
 ALTER TABLE purchase
 ADD CONSTRAINT fk_purchase_supplier
@@ -227,7 +193,6 @@ SET p.supplier_id = s.supplier_id
 WHERE p.supplier_id IS NULL;
 
 
--------------- 
 CREATE TABLE purchase_line (
   purchase_line_id INT AUTO_INCREMENT PRIMARY KEY,
   purchase_id INT NOT NULL,
@@ -244,11 +209,7 @@ CREATE TABLE purchase_line (
     CHECK (quantity > 0)
 );
 
-
--- =========================
--- 5) purchase_line
 -- Remove derived attribute
--- =========================
 ALTER TABLE purchase_line
   DROP COLUMN line_total;
   
@@ -260,9 +221,6 @@ CREATE TABLE supplier (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- =========================================================
--- NEW: STOCK TRANSFERS (warehouse → branch)
--- =========================================================
 CREATE TABLE stock_transfer (
   transfer_id INT AUTO_INCREMENT PRIMARY KEY,
   warehouse_id INT NOT NULL,
@@ -284,9 +242,7 @@ CREATE TABLE stock_transfer (
     CHECK (quantity > 0)
 );
 
--- =========================================================
--- UPDATED: STOCK MOVEMENTS (audit trail)
--- =========================================================
+
 CREATE TABLE stock_movement (
   movement_id INT AUTO_INCREMENT PRIMARY KEY,
   
@@ -364,10 +320,8 @@ CREATE TABLE booking (
   CONSTRAINT fk_booking_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
   CONSTRAINT chk_booking_dates CHECK (date_to > date_from)
 );
--- =========================
--- 6) booking
+
 -- Remove derived attribute
--- =========================
 ALTER TABLE booking
   DROP COLUMN total_amount;
 
@@ -390,14 +344,9 @@ CREATE TABLE booking_room (
   UNIQUE (booking_id, cat_id)
 );
 
--- =========================
--- 7) booking_room
 -- Remove derived attribute
--- =========================
 ALTER TABLE booking_room
   DROP COLUMN line_total;
-
-
 
 -- =========================================================
 -- SAMPLE DATA
@@ -412,6 +361,7 @@ VALUES ('Employee1', 'Employee@pets.com', 'TEMP_HASH1', 'employee');
 INSERT INTO users (full_name, email, password_hash, role)
 VALUES ('Employee2', 'Employee2@pets.com', 'TEMP_HASH2', 'employee');
 select * from users;
+
 -- Categories
 INSERT INTO category (category_name) VALUES
 ('Pet Food'),
@@ -464,7 +414,3 @@ VALUES ('R01','Standard',1),('R02','Standard',1),('R03','Standard',1),('R04','St
 INSERT INTO employee (user_id, hourly_rate)
 VALUES (3, 12.00)
 ON DUPLICATE KEY UPDATE hourly_rate=12.00;
-
-
-select * from users;
-select * from supplier;

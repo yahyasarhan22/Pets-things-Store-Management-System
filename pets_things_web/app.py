@@ -11,7 +11,8 @@ import time
 from datetime import datetime, date
 from flask import redirect, url_for, flash
 from db import get_connection
-from datetime import date
+from decimal import Decimal
+
 
 # Load environment variables
 load_dotenv()
@@ -46,6 +47,15 @@ def to_int(value):
         return int(value)
     return int(value)
 
+@app.context_processor
+def inject_dashboard_metrics():
+    data = {"nav_low_stock_count": None, "today_sales": None}
+
+    if 'user_id' in session and session.get('role') in ('admin', 'employee'):
+        data["nav_low_stock_count"] = get_low_stock_count()
+        data["today_sales"] = get_today_sales_summary()
+
+    return data
 
 def login_required(f):
     """
@@ -83,7 +93,7 @@ def role_required(*allowed_roles):
 # ==================== ROUTES ====================
 from flask import render_template
 
-
+# ==================== Section 1 Products ====================
 @app.route('/products')
 def products():
     conn = get_connection()
@@ -264,9 +274,6 @@ def active_products():
         cursor.close()
         conn.close()
 
-
-
-######################
 @app.route("/products/add", methods=["GET", "POST"])
 @role_required("admin", "employee")
 def add_product():
@@ -289,7 +296,7 @@ def add_product():
             description = (request.form.get("description") or "").strip()
             is_active = 1 if request.form.get("is_active") == "1" else 0
 
-            # ✅ Handle image upload
+            #  Handle image upload
             image_file = request.files.get("product_image")
             image_path = None
 
@@ -317,7 +324,7 @@ def add_product():
                                        product=None)
 
             try:
-                # ✅ Start transaction (same as yours)
+                #  Start transaction 
                 cur.execute("""
                     INSERT INTO product (product_name, category_id, unit_price, description, is_active, product_image)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -373,7 +380,6 @@ def add_product():
         conn.close()
 
 
-##########################
 @app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
 @role_required("admin", "employee")
 def edit_product(product_id):
@@ -403,7 +409,7 @@ def edit_product(product_id):
             description = (request.form.get("description") or "").strip()
             is_active = 1 if request.form.get("is_active") == "1" else 0
 
-            # ✅ Handle optional new image
+            #  Handle optional new image
             image_file = request.files.get("product_image")
             new_image_path = product.get("product_image")  # default keep old
 
@@ -422,7 +428,7 @@ def edit_product(product_id):
 
                 new_image_path = f"uploads/products/{filename}"
 
-                # Optional: delete old image file if it exists
+                # delete old image file if it exists
                 old_path = product.get("product_image")
                 if old_path:
                     try:
@@ -478,8 +484,7 @@ def edit_product(product_id):
     finally:
         cur.close()
         conn.close()
-
-############
+        
 
 @app.route("/products/<int:product_id>/delete", methods=["POST"])
 @role_required("admin", "employee")
@@ -492,7 +497,7 @@ def delete_product(product_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ✅ Check if product is used in any transactions
+        #  Check if product is used in any transactions
         cur.execute("""
             SELECT 
                 (SELECT COUNT(*) FROM purchase_line WHERE product_id = %s) AS purchase_count,
@@ -534,7 +539,7 @@ def delete_product(product_id):
         cur.close()
         conn.close()
 
-
+# ==================== Section 2 inventory ====================
 
 @app.route('/inventory')
 @role_required('admin', 'employee')
@@ -740,515 +745,6 @@ def inventory():
             cur.close()
             conn.close()
 
-# =========================================================
-# NEW: STOCK TRANSFER ROUTE (warehouse → branch)
-# =========================================================
-
-@app.route('/inventory/transfer', methods=['POST'])
-@role_required('admin', 'employee')
-def transfer_stock():
-    """
-    Transfer stock from warehouse to branch.
-    Replaces the old 'restock' functionality.
-    """
-    warehouse_id = request.form.get('warehouse_id', type=int)
-    branch_id = request.form.get('branch_id', type=int)
-    product_id = request.form.get('product_id', type=int)
-    quantity = request.form.get('quantity', type=int)
-
-    if not all([warehouse_id, branch_id, product_id, quantity]) or quantity < 1:
-        flash("Invalid transfer request.", "danger")
-        return redirect(url_for('inventory'))
-
-    conn = get_connection()
-    if not conn:
-        flash("DB connection failed.", "danger")
-        return redirect(url_for('inventory'))
-
-    try:
-        performed_by = session.get("user_id")
-        cur = conn.cursor(dictionary=True)
-
-        # 1) Check warehouse stock
-        cur.execute("""
-            SELECT on_hand_qty 
-            FROM warehouse_stock 
-            WHERE warehouse_id = %s AND product_id = %s
-            FOR UPDATE
-        """, (warehouse_id, product_id))
-        
-        warehouse_stock = cur.fetchone()
-        if not warehouse_stock:
-            conn.rollback()
-            flash("Product not found in warehouse.", "danger")
-            return redirect(url_for('inventory'))
-            
-        if warehouse_stock['on_hand_qty'] < quantity:
-            conn.rollback()
-            flash(f"Insufficient warehouse stock. Available: {warehouse_stock['on_hand_qty']}", "warning")
-            return redirect(url_for('inventory'))
-
-        # 2) Decrease warehouse stock
-        cur.execute("""
-            UPDATE warehouse_stock
-            SET on_hand_qty = on_hand_qty - %s
-            WHERE warehouse_id = %s AND product_id = %s
-        """, (quantity, warehouse_id, product_id))
-
-        # 3) Increase branch stock
-        cur.execute("""
-            UPDATE branch_stock
-            SET on_hand_qty = on_hand_qty + %s,
-                last_restock_date = NOW()
-            WHERE branch_id = %s AND product_id = %s
-        """, (quantity, branch_id, product_id))
-
-        # 4) Log transfer
-        cur.execute("""
-            INSERT INTO stock_transfer
-                (warehouse_id, branch_id, product_id, quantity, performed_by)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (warehouse_id, branch_id, product_id, quantity, performed_by))
-        
-        transfer_id = cur.lastrowid
-
-        # 5) Log movements
-        # Warehouse: TRANSFER_OUT (negative)
-        cur.execute("""
-            INSERT INTO stock_movement
-                (warehouse_id, product_id, change_qty, movement_type, 
-                 reference_transfer_id, performed_by)
-            VALUES (%s, %s, %s, 'TRANSFER_OUT', %s, %s)
-        """, (warehouse_id, product_id, -quantity, transfer_id, performed_by))
-
-        # Branch: TRANSFER_IN (positive)
-        cur.execute("""
-            INSERT INTO stock_movement
-                (branch_id, product_id, change_qty, movement_type,
-                 reference_transfer_id, performed_by)
-            VALUES (%s, %s, %s, 'TRANSFER_IN', %s, %s)
-        """, (branch_id, product_id, quantity, transfer_id, performed_by))
-
-        conn.commit()
-        flash(f"Successfully transferred {quantity} units to branch.", "success")
-        return redirect(request.referrer or url_for('inventory'))
-
-    except Exception as e:
-        conn.rollback()
-        print(f"Transfer error: {e}")
-        flash("Error during transfer.", "danger")
-        return redirect(url_for('inventory'))
-    finally:
-        if cur:
-            cur.close()
-        if conn and conn.is_connected():
-            conn.close()
-            
-            
-# ============================================================
-# SECTION 5: PURCHASE ROUTES
-# ============================================================
-
-@app.route('/purchases/new', methods=['GET', 'POST'])
-@role_required('admin', 'employee')
-def purchase_new():
-    conn = get_connection()
-    if not conn:
-        flash("Database connection failed.", "danger")
-        return redirect(url_for('dashboard'))
-
-    cur = conn.cursor(dictionary=True)
-
-    try:
-        cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
-        warehouses = cur.fetchall()
-
-        cur.execute("SELECT supplier_id, name FROM supplier ORDER BY name")
-        suppliers = cur.fetchall()
-
-        cur.execute("SELECT product_id, product_name, unit_price FROM product WHERE is_active = 1 ORDER BY product_name")
-        products = cur.fetchall()
-
-        if request.method == 'POST':
-            warehouse_id = request.form.get('warehouse_id', type=int)
-            supplier_id = request.form.get('supplier_id', type=int)
-
-            if not warehouse_id or not supplier_id:
-                flash("Please select warehouse and supplier.", "warning")
-                return render_template('purchase_form.html',
-                                       warehouses=warehouses,
-                                       suppliers=suppliers,
-                                       products=products,
-                                       selected_warehouse_id=warehouse_id,
-                                       selected_supplier_id=supplier_id)
-
-            performed_by = session.get('user_id')
-
-            try:
-                # ✅ FIXED: Remove supplier_name and total_amount from INSERT
-                cur.execute("""
-                    INSERT INTO purchase (warehouse_id, supplier_id, performed_by)
-                    VALUES (%s, %s, %s)
-                """, (warehouse_id, supplier_id, performed_by))
-
-                purchase_id = cur.lastrowid
-                conn.commit()
-
-                flash("Purchase created. Add items now.", "success")
-                return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-            except Exception as e:
-                conn.rollback()
-                print("purchase_new insert error:", e)
-                flash("Failed to create purchase. Please try again.", "danger")
-                return render_template('purchase_form.html',
-                                       warehouses=warehouses,
-                                       suppliers=suppliers,
-                                       products=products,
-                                       selected_warehouse_id=warehouse_id,
-                                       selected_supplier_id=supplier_id)
-
-        return render_template('purchase_form.html',
-                               warehouses=warehouses,
-                               suppliers=suppliers,
-                               products=products,
-                               selected_warehouse_id=None,
-                               selected_supplier_id=None)
-
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.route('/purchases/<int:purchase_id>')
-@role_required('admin', 'employee')
-def purchase_detail(purchase_id):
-    conn = get_connection()
-    if not conn:
-        flash("Database connection failed.", "danger")
-        return redirect(url_for('dashboard'))
-
-    try:
-        cur = conn.cursor(dictionary=True)
-
-        # ✅ FIXED: Compute total_amount and get supplier name from supplier table
-        cur.execute("""
-            SELECT
-                p.purchase_id,
-                p.warehouse_id,
-                w.warehouse_name,
-                p.purchase_date,
-                s.name AS supplier_name,
-                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
-                p.performed_by,
-                u.full_name AS performed_by_name
-            FROM purchase p
-            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-            JOIN users u ON p.performed_by = u.user_id
-            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
-            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
-            WHERE p.purchase_id = %s
-            GROUP BY p.purchase_id, p.warehouse_id, w.warehouse_name, p.purchase_date,
-                     s.name, p.performed_by, u.full_name
-        """, (purchase_id,))
-        
-        purchase = cur.fetchone()
-        if not purchase:
-            flash("Purchase not found.", "warning")
-            return redirect(url_for('purchases_list'))
-
-        cur.execute("""
-            SELECT product_id, product_name, unit_price
-            FROM product
-            WHERE is_active = 1
-            ORDER BY product_name
-        """)
-        products = cur.fetchall()
-
-        # ✅ FIXED: Compute line_total in SELECT
-        cur.execute("""
-            SELECT
-                pl.purchase_line_id,
-                pl.product_id,
-                p.product_name,
-                pl.quantity,
-                pl.unit_cost,
-                (pl.quantity * pl.unit_cost) AS line_total
-            FROM purchase_line pl
-            JOIN product p ON pl.product_id = p.product_id
-            WHERE pl.purchase_id = %s
-            ORDER BY pl.purchase_line_id
-        """, (purchase_id,))
-        lines = cur.fetchall()
-
-        total = sum(float(l["line_total"]) for l in lines) if lines else 0.0
-
-        return render_template(
-            'purchase_detail.html',
-            purchase=purchase,
-            products=products,
-            lines=lines,
-            computed_total=total,
-            error=None
-        )
-
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.route('/purchases/<int:purchase_id>/add-item', methods=['POST'])
-@role_required('admin', 'employee')
-def purchase_add_item(purchase_id):
-    product_id = request.form.get('product_id', type=int)
-    quantity = request.form.get('quantity', type=int)
-    unit_cost = request.form.get('unit_cost', type=float)
-
-    if not product_id or not quantity or quantity <= 0 or not unit_cost or unit_cost < 0:
-        flash("Invalid item details.", "warning")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-    conn = get_connection()
-    if not conn:
-        flash("Database connection failed.", "danger")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-    try:
-        cur = conn.cursor(dictionary=True)
-
-        cur.execute("""
-            SELECT purchase_line_id, quantity, unit_cost
-            FROM purchase_line
-            WHERE purchase_id = %s AND product_id = %s
-        """, (purchase_id, product_id))
-        
-        existing = cur.fetchone()
-
-        if existing:
-            new_qty = existing['quantity'] + quantity
-            
-            # ✅ FIXED: Remove line_total from UPDATE
-            cur.execute("""
-                UPDATE purchase_line
-                SET quantity = %s, unit_cost = %s
-                WHERE purchase_line_id = %s
-            """, (new_qty, unit_cost, existing['purchase_line_id']))
-        else:
-            # ✅ FIXED: Remove line_total from INSERT
-            cur.execute("""
-                INSERT INTO purchase_line (purchase_id, product_id, quantity, unit_cost)
-                VALUES (%s, %s, %s, %s)
-            """, (purchase_id, product_id, quantity, unit_cost))
-
-        conn.commit()
-        flash("Item added to purchase.", "success")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-    except Exception as e:
-        conn.rollback()
-        print("purchase_add_item error:", e)
-        flash("Failed to add item.", "danger")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.route('/purchases/<int:purchase_id>/complete', methods=['POST'])
-@role_required('admin', 'employee')
-def purchase_complete(purchase_id):
-    conn = get_connection()
-    if not conn:
-        flash("Database connection failed.", "danger")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-    try:
-        performed_by = session.get("user_id")
-        cur = conn.cursor(dictionary=True)
-
-        cur.execute("SELECT warehouse_id FROM purchase WHERE purchase_id = %s", (purchase_id,))
-        purchase = cur.fetchone()
-        if not purchase:
-            conn.rollback()
-            flash("Purchase not found.", "warning")
-            return redirect(url_for('purchases_list'))
-
-        warehouse_id = purchase['warehouse_id']
-
-        cur.execute("""
-            SELECT product_id, quantity
-            FROM purchase_line
-            WHERE purchase_id = %s
-        """, (purchase_id,))
-        lines = cur.fetchall()
-
-        if not lines:
-            conn.rollback()
-            flash("Add at least one item before completing.", "warning")
-            return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-
-        for line in lines:
-            product_id = line['product_id']
-            qty = line['quantity']
-
-            cur.execute("""
-                UPDATE warehouse_stock
-                SET on_hand_qty = on_hand_qty + %s,
-                    last_purchase_date = NOW()
-                WHERE warehouse_id = %s AND product_id = %s
-            """, (qty, warehouse_id, product_id))
-
-            cur.execute("""
-                INSERT INTO stock_movement
-                    (warehouse_id, product_id, change_qty, movement_type,
-                     reference_purchase_id, performed_by)
-                VALUES (%s, %s, %s, 'PURCHASE', %s, %s)
-            """, (warehouse_id, product_id, qty, purchase_id, performed_by))
-
-        # ✅ FIXED: No need to update total_amount (it's computed)
-        conn.commit()
-        flash("Purchase completed. Warehouse stock updated.", "success")
-        return redirect(url_for('purchases_list'))
-
-    except Exception as e:
-        conn.rollback()
-        print("purchase_complete error:", e)
-        flash("Failed to complete purchase.", "danger")
-        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
-    finally:
-        if cur:
-            cur.close()
-        if conn and conn.is_connected():
-            conn.close()
-
-
-@app.route('/purchases')
-@role_required('admin', 'employee')
-def purchases_list():
-    conn = get_connection()
-    if not conn:
-        return render_template('purchases.html', purchases=[], warehouses=[], error="DB connection failed")
-
-    try:
-        cur = conn.cursor(dictionary=True)
-
-        warehouse_id = request.args.get('warehouse_id', type=int)
-        date_from = (request.args.get('date_from') or '').strip()
-        date_to = (request.args.get('date_to') or '').strip()
-
-        cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
-        warehouses = cur.fetchall()
-
-        conditions = []
-        params = []
-
-        if warehouse_id:
-            conditions.append("p.warehouse_id = %s")
-            params.append(warehouse_id)
-
-        if date_from:
-            conditions.append("DATE(p.purchase_date) >= %s")
-            params.append(date_from)
-
-        if date_to:
-            conditions.append("DATE(p.purchase_date) <= %s")
-            params.append(date_to)
-
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
-
-        # ✅ FIXED: Get supplier name from supplier table and compute total_amount
-        cur.execute(f"""
-            SELECT
-                p.purchase_id,
-                p.purchase_date,
-                w.warehouse_name,
-                p.supplier_id,
-                COALESCE(s.name, 'Unknown') AS supplier_name,
-                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
-                u.full_name AS performed_by_name
-            FROM purchase p
-            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-            JOIN users u ON p.performed_by = u.user_id
-            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
-            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
-            {where_clause}
-            GROUP BY p.purchase_id, p.purchase_date, w.warehouse_name, 
-                     p.supplier_id, s.name, u.full_name
-            ORDER BY p.purchase_date DESC
-        """, params)
-
-        purchases = cur.fetchall()
-
-        return render_template(
-            'purchases.html',
-            purchases=purchases,
-            warehouses=warehouses,
-            selected_warehouse_id=warehouse_id,
-            date_from=date_from,
-            date_to=date_to,
-            error=None
-        )
-
-    finally:
-        cur.close()
-        conn.close()
-
-@app.route("/suppliers")
-@role_required("admin", "employee")
-def suppliers_list():
-    conn = get_connection()
-    if not conn:
-        return render_template("suppliers.html", suppliers=[], error="DB connection failed")
-
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT supplier_id, name, contact, address
-            FROM supplier
-            ORDER BY name
-        """)
-        suppliers = cur.fetchall()
-        return render_template("suppliers.html", suppliers=suppliers, error=None)
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.route("/suppliers/add", methods=["GET", "POST"])
-@role_required("admin", "employee")
-def supplier_add():
-    if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
-        contact = (request.form.get("contact") or "").strip()
-        address = (request.form.get("address") or "").strip()
-
-        if not name:
-            flash("Supplier name is required.", "warning")
-            return render_template("supplier_form.html", mode="add", supplier=None)
-
-        conn = get_connection()
-        if not conn:
-            flash("DB connection failed.", "danger")
-            return render_template("supplier_form.html", mode="add", supplier=None)
-
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO supplier (name, contact, address)
-                VALUES (%s, %s, %s)
-            """, (name, contact or None, address or None))
-            conn.commit()
-            flash("Supplier added successfully.", "success")
-            return redirect(url_for("purchase_new"))  # go back to purchase page
-        finally:
-            cur.close()
-            conn.close()
-
-    return render_template("supplier_form.html", mode="add", supplier=None)
-
-
 @app.route('/inventory/restock', methods=['POST'])
 @role_required('admin', 'employee')
 def restock_inventory():
@@ -1285,7 +781,7 @@ def restock_inventory():
             flash("Stock row not found for this product and branch.", "danger")
             return redirect(url_for('inventory'))
 
-        # 2) Log movement (RESTOCK) ✅
+        # 2) Log movement (RESTOCK) 
         cur.execute("""
             INSERT INTO stock_movement
                 (branch_id, product_id, change_qty, movement_type, reference_sale_id, performed_by)
@@ -1413,9 +909,506 @@ def get_today_sales_summary():
             conn.close()
 
 
-# ============================================================
-# SECTION 4: SALES ROUTES
-# ============================================================
+@app.route('/inventory/transfer', methods=['POST'])
+@role_required('admin', 'employee')
+def transfer_stock():
+    """
+    Transfer stock from warehouse to branch.
+    Replaces the old 'restock' functionality.
+    """
+    warehouse_id = request.form.get('warehouse_id', type=int)
+    branch_id = request.form.get('branch_id', type=int)
+    product_id = request.form.get('product_id', type=int)
+    quantity = request.form.get('quantity', type=int)
+
+    if not all([warehouse_id, branch_id, product_id, quantity]) or quantity < 1:
+        flash("Invalid transfer request.", "danger")
+        return redirect(url_for('inventory'))
+
+    conn = get_connection()
+    if not conn:
+        flash("DB connection failed.", "danger")
+        return redirect(url_for('inventory'))
+
+    try:
+        performed_by = session.get("user_id")
+        cur = conn.cursor(dictionary=True)
+
+        # 1) Check warehouse stock
+        cur.execute("""
+            SELECT on_hand_qty 
+            FROM warehouse_stock 
+            WHERE warehouse_id = %s AND product_id = %s
+            FOR UPDATE
+        """, (warehouse_id, product_id))
+        
+        warehouse_stock = cur.fetchone()
+        if not warehouse_stock:
+            conn.rollback()
+            flash("Product not found in warehouse.", "danger")
+            return redirect(url_for('inventory'))
+            
+        if warehouse_stock['on_hand_qty'] < quantity:
+            conn.rollback()
+            flash(f"Insufficient warehouse stock. Available: {warehouse_stock['on_hand_qty']}", "warning")
+            return redirect(url_for('inventory'))
+
+        # 2) Decrease warehouse stock
+        cur.execute("""
+            UPDATE warehouse_stock
+            SET on_hand_qty = on_hand_qty - %s
+            WHERE warehouse_id = %s AND product_id = %s
+        """, (quantity, warehouse_id, product_id))
+
+        # 3) Increase branch stock
+        cur.execute("""
+            UPDATE branch_stock
+            SET on_hand_qty = on_hand_qty + %s,
+                last_restock_date = NOW()
+            WHERE branch_id = %s AND product_id = %s
+        """, (quantity, branch_id, product_id))
+
+        # 4) Log transfer
+        cur.execute("""
+            INSERT INTO stock_transfer
+                (warehouse_id, branch_id, product_id, quantity, performed_by)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (warehouse_id, branch_id, product_id, quantity, performed_by))
+        
+        transfer_id = cur.lastrowid
+
+        # 5) Log movements
+        # Warehouse: TRANSFER_OUT (negative)
+        cur.execute("""
+            INSERT INTO stock_movement
+                (warehouse_id, product_id, change_qty, movement_type, 
+                 reference_transfer_id, performed_by)
+            VALUES (%s, %s, %s, 'TRANSFER_OUT', %s, %s)
+        """, (warehouse_id, product_id, -quantity, transfer_id, performed_by))
+
+        # Branch: TRANSFER_IN (positive)
+        cur.execute("""
+            INSERT INTO stock_movement
+                (branch_id, product_id, change_qty, movement_type,
+                 reference_transfer_id, performed_by)
+            VALUES (%s, %s, %s, 'TRANSFER_IN', %s, %s)
+        """, (branch_id, product_id, quantity, transfer_id, performed_by))
+
+        conn.commit()
+        flash(f"Successfully transferred {quantity} units to branch.", "success")
+        return redirect(request.referrer or url_for('inventory'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Transfer error: {e}")
+        flash("Error during transfer.", "danger")
+        return redirect(url_for('inventory'))
+    finally:
+        if cur:
+            cur.close()
+        if conn and conn.is_connected():
+            conn.close()
+            
+            
+# ==================== Section 3 purchase ====================
+@app.route('/purchases/new', methods=['GET', 'POST'])
+@role_required('admin', 'employee')
+def purchase_new():
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for('dashboard'))
+
+    cur = conn.cursor(dictionary=True)
+
+    try:
+        cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
+        warehouses = cur.fetchall()
+
+        cur.execute("SELECT supplier_id, name FROM supplier ORDER BY name")
+        suppliers = cur.fetchall()
+
+        cur.execute("SELECT product_id, product_name, unit_price FROM product WHERE is_active = 1 ORDER BY product_name")
+        products = cur.fetchall()
+
+        if request.method == 'POST':
+            warehouse_id = request.form.get('warehouse_id', type=int)
+            supplier_id = request.form.get('supplier_id', type=int)
+
+            if not warehouse_id or not supplier_id:
+                flash("Please select warehouse and supplier.", "warning")
+                return render_template('purchase_form.html',
+                                       warehouses=warehouses,
+                                       suppliers=suppliers,
+                                       products=products,
+                                       selected_warehouse_id=warehouse_id,
+                                       selected_supplier_id=supplier_id)
+
+            performed_by = session.get('user_id')
+
+            try:
+                cur.execute("""
+                    INSERT INTO purchase (warehouse_id, supplier_id, performed_by)
+                    VALUES (%s, %s, %s)
+                """, (warehouse_id, supplier_id, performed_by))
+
+                purchase_id = cur.lastrowid
+                conn.commit()
+
+                flash("Purchase created. Add items now.", "success")
+                return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+            except Exception as e:
+                conn.rollback()
+                print("purchase_new insert error:", e)
+                flash("Failed to create purchase. Please try again.", "danger")
+                return render_template('purchase_form.html',
+                                       warehouses=warehouses,
+                                       suppliers=suppliers,
+                                       products=products,
+                                       selected_warehouse_id=warehouse_id,
+                                       selected_supplier_id=supplier_id)
+
+        return render_template('purchase_form.html',
+                               warehouses=warehouses,
+                               suppliers=suppliers,
+                               products=products,
+                               selected_warehouse_id=None,
+                               selected_supplier_id=None)
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/purchases/<int:purchase_id>')
+@role_required('admin', 'employee')
+def purchase_detail(purchase_id):
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for('dashboard'))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT
+                p.purchase_id,
+                p.warehouse_id,
+                w.warehouse_name,
+                p.purchase_date,
+                s.name AS supplier_name,
+                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
+                p.performed_by,
+                u.full_name AS performed_by_name
+            FROM purchase p
+            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+            JOIN users u ON p.performed_by = u.user_id
+            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
+            WHERE p.purchase_id = %s
+            GROUP BY p.purchase_id, p.warehouse_id, w.warehouse_name, p.purchase_date,
+                     s.name, p.performed_by, u.full_name
+        """, (purchase_id,))
+        
+        purchase = cur.fetchone()
+        if not purchase:
+            flash("Purchase not found.", "warning")
+            return redirect(url_for('purchases_list'))
+
+        cur.execute("""
+            SELECT product_id, product_name, unit_price
+            FROM product
+            WHERE is_active = 1
+            ORDER BY product_name
+        """)
+        products = cur.fetchall()
+
+        cur.execute("""
+            SELECT
+                pl.purchase_line_id,
+                pl.product_id,
+                p.product_name,
+                pl.quantity,
+                pl.unit_cost,
+                (pl.quantity * pl.unit_cost) AS line_total
+            FROM purchase_line pl
+            JOIN product p ON pl.product_id = p.product_id
+            WHERE pl.purchase_id = %s
+            ORDER BY pl.purchase_line_id
+        """, (purchase_id,))
+        lines = cur.fetchall()
+
+        total = sum(float(l["line_total"]) for l in lines) if lines else 0.0
+
+        return render_template(
+            'purchase_detail.html',
+            purchase=purchase,
+            products=products,
+            lines=lines,
+            computed_total=total,
+            error=None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/purchases/<int:purchase_id>/add-item', methods=['POST'])
+@role_required('admin', 'employee')
+def purchase_add_item(purchase_id):
+    product_id = request.form.get('product_id', type=int)
+    quantity = request.form.get('quantity', type=int)
+    unit_cost = request.form.get('unit_cost', type=float)
+
+    if not product_id or not quantity or quantity <= 0 or not unit_cost or unit_cost < 0:
+        flash("Invalid item details.", "warning")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("""
+            SELECT purchase_line_id, quantity, unit_cost
+            FROM purchase_line
+            WHERE purchase_id = %s AND product_id = %s
+        """, (purchase_id, product_id))
+        
+        existing = cur.fetchone()
+
+        if existing:
+            new_qty = existing['quantity'] + quantity
+            
+            cur.execute("""
+                UPDATE purchase_line
+                SET quantity = %s, unit_cost = %s
+                WHERE purchase_line_id = %s
+            """, (new_qty, unit_cost, existing['purchase_line_id']))
+        else:
+            cur.execute("""
+                INSERT INTO purchase_line (purchase_id, product_id, quantity, unit_cost)
+                VALUES (%s, %s, %s, %s)
+            """, (purchase_id, product_id, quantity, unit_cost))
+
+        conn.commit()
+        flash("Item added to purchase.", "success")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+    except Exception as e:
+        conn.rollback()
+        print("purchase_add_item error:", e)
+        flash("Failed to add item.", "danger")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/purchases/<int:purchase_id>/complete', methods=['POST'])
+@role_required('admin', 'employee')
+def purchase_complete(purchase_id):
+    conn = get_connection()
+    if not conn:
+        flash("Database connection failed.", "danger")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+    try:
+        performed_by = session.get("user_id")
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("SELECT warehouse_id FROM purchase WHERE purchase_id = %s", (purchase_id,))
+        purchase = cur.fetchone()
+        if not purchase:
+            conn.rollback()
+            flash("Purchase not found.", "warning")
+            return redirect(url_for('purchases_list'))
+
+        warehouse_id = purchase['warehouse_id']
+
+        cur.execute("""
+            SELECT product_id, quantity
+            FROM purchase_line
+            WHERE purchase_id = %s
+        """, (purchase_id,))
+        lines = cur.fetchall()
+
+        if not lines:
+            conn.rollback()
+            flash("Add at least one item before completing.", "warning")
+            return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+        for line in lines:
+            product_id = line['product_id']
+            qty = line['quantity']
+
+            cur.execute("""
+                UPDATE warehouse_stock
+                SET on_hand_qty = on_hand_qty + %s,
+                    last_purchase_date = NOW()
+                WHERE warehouse_id = %s AND product_id = %s
+            """, (qty, warehouse_id, product_id))
+
+            cur.execute("""
+                INSERT INTO stock_movement
+                    (warehouse_id, product_id, change_qty, movement_type,
+                     reference_purchase_id, performed_by)
+                VALUES (%s, %s, %s, 'PURCHASE', %s, %s)
+            """, (warehouse_id, product_id, qty, purchase_id, performed_by))
+
+        conn.commit()
+        flash("Purchase completed. Warehouse stock updated.", "success")
+        return redirect(url_for('purchases_list'))
+
+    except Exception as e:
+        conn.rollback()
+        print("purchase_complete error:", e)
+        flash("Failed to complete purchase.", "danger")
+        return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+    finally:
+        if cur:
+            cur.close()
+        if conn and conn.is_connected():
+            conn.close()
+
+
+@app.route('/purchases')
+@role_required('admin', 'employee')
+def purchases_list():
+    conn = get_connection()
+    if not conn:
+        return render_template('purchases.html', purchases=[], warehouses=[], error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        warehouse_id = request.args.get('warehouse_id', type=int)
+        date_from = (request.args.get('date_from') or '').strip()
+        date_to = (request.args.get('date_to') or '').strip()
+
+        cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
+        warehouses = cur.fetchall()
+
+        conditions = []
+        params = []
+
+        if warehouse_id:
+            conditions.append("p.warehouse_id = %s")
+            params.append(warehouse_id)
+
+        if date_from:
+            conditions.append("DATE(p.purchase_date) >= %s")
+            params.append(date_from)
+
+        if date_to:
+            conditions.append("DATE(p.purchase_date) <= %s")
+            params.append(date_to)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        cur.execute(f"""
+            SELECT
+                p.purchase_id,
+                p.purchase_date,
+                w.warehouse_name,
+                p.supplier_id,
+                COALESCE(s.name, 'Unknown') AS supplier_name,
+                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
+                u.full_name AS performed_by_name
+            FROM purchase p
+            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+            JOIN users u ON p.performed_by = u.user_id
+            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
+            {where_clause}
+            GROUP BY p.purchase_id, p.purchase_date, w.warehouse_name, 
+                     p.supplier_id, s.name, u.full_name
+            ORDER BY p.purchase_date DESC
+        """, params)
+
+        purchases = cur.fetchall()
+
+        return render_template(
+            'purchases.html',
+            purchases=purchases,
+            warehouses=warehouses,
+            selected_warehouse_id=warehouse_id,
+            date_from=date_from,
+            date_to=date_to,
+            error=None
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ==================== Section 4 Suppliers ====================
+
+@app.route("/suppliers")
+@role_required("admin", "employee")
+def suppliers_list():
+    conn = get_connection()
+    if not conn:
+        return render_template("suppliers.html", suppliers=[], error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT supplier_id, name, contact, address
+            FROM supplier
+            ORDER BY name
+        """)
+        suppliers = cur.fetchall()
+        return render_template("suppliers.html", suppliers=suppliers, error=None)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/suppliers/add", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def supplier_add():
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        contact = (request.form.get("contact") or "").strip()
+        address = (request.form.get("address") or "").strip()
+
+        if not name:
+            flash("Supplier name is required.", "warning")
+            return render_template("supplier_form.html", mode="add", supplier=None)
+
+        conn = get_connection()
+        if not conn:
+            flash("DB connection failed.", "danger")
+            return render_template("supplier_form.html", mode="add", supplier=None)
+
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO supplier (name, contact, address)
+                VALUES (%s, %s, %s)
+            """, (name, contact or None, address or None))
+            conn.commit()
+            flash("Supplier added successfully.", "success")
+            return redirect(url_for("purchase_new"))  # go back to purchase page
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("supplier_form.html", mode="add", supplier=None)
+
+
+
+
+# ==================== Section 5 Sales ====================
 
 @app.route("/sales/new", methods=["GET", "POST"])
 @role_required("admin", "employee")
@@ -1454,7 +1447,6 @@ def sales_new():
                                        selected_branch_id=branch_id,
                                        selected_customer_id=customer_id)
 
-            # ✅ FIXED: Remove total_amount from INSERT
             cur2 = conn.cursor()
             cur2.execute("""
                 INSERT INTO sale (branch_id, employee_id, customer_id)
@@ -1541,7 +1533,6 @@ def sale_detail(sale_id):
         """, (sale_id,))
         lines = cur.fetchall()
 
-        # ✅ FIX: Convert Decimal to float for computation
         from decimal import Decimal
         total = sum(float(l["line_total"]) if isinstance(l["line_total"], Decimal) else l["line_total"] 
                     for l in lines) if lines else 0.0
@@ -1571,7 +1562,6 @@ def sale_receipt(sale_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute("""
             SELECT
                 s.sale_id,
@@ -1594,7 +1584,6 @@ def sale_receipt(sale_id):
             flash("Sale not found.", "warning")
             return redirect(url_for("sales_list"))
 
-        # ✅ FIXED: Compute line_total in SELECT
         cur.execute("""
             SELECT
                 p.product_name,
@@ -1654,7 +1643,6 @@ def sale_add_item(sale_id):
         if existing:
             new_qty = int(existing["quantity"]) + qty
 
-            # ✅ FIXED: Remove line_total from UPDATE
             cur.execute("""
                 UPDATE sale_line
                 SET quantity = %s,
@@ -1662,7 +1650,6 @@ def sale_add_item(sale_id):
                 WHERE sale_line_id = %s
             """, (new_qty, unit_price, existing["sale_line_id"]))
         else:
-            # ✅ FIXED: Remove line_total from INSERT
             cur.execute("""
                 INSERT INTO sale_line (sale_id, product_id, quantity, unit_price)
                 VALUES (%s, %s, %s, %s)
@@ -1718,7 +1705,6 @@ def sale_complete(sale_id):
 
         for line in lines:
             pid = line["product_id"]
-            # ✅ FIX: Convert to int to avoid Decimal issues
             qty = int(line["quantity"])
 
             cur.execute("""
@@ -1804,7 +1790,6 @@ def sales_list():
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
-        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute(f"""
             SELECT
                 s.sale_id,
@@ -1880,17 +1865,6 @@ def sale_remove_line(sale_id):
 
     return redirect(url_for("sale_detail", sale_id=sale_id))
 
-
-@app.context_processor
-def inject_dashboard_metrics():
-    data = {"nav_low_stock_count": None, "today_sales": None}
-
-    if 'user_id' in session and session.get('role') in ('admin', 'employee'):
-        data["nav_low_stock_count"] = get_low_stock_count()
-        data["today_sales"] = get_today_sales_summary()
-
-    return data
-
 # ============================================================
 # SECTION 7: REPORTS WITH COMPUTED TOTALS
 # ============================================================
@@ -1943,7 +1917,7 @@ def report_top_products():
 
         order_sql = "total_qty DESC" if metric == "qty" else "total_revenue DESC"
 
-        # ✅ FIXED: Compute total_revenue using quantity * unit_price
+        # Compute total_revenue using quantity * unit_price
         query = f"""
             SELECT
                 p.product_id,
@@ -2023,7 +1997,7 @@ def sales_analytics():
 
         where_clause = "WHERE " + " AND ".join(conditions)
 
-        # ✅ FIXED: KPI summary with computed revenue
+        #  KPI summary with computed revenue
         cur.execute(f"""
             SELECT
                 COUNT(DISTINCT s.sale_id) AS sale_count,
@@ -2040,7 +2014,7 @@ def sales_analytics():
         """, params)
         summary = cur.fetchone()
 
-        # ✅ FIXED: Trend with computed revenue
+        # Trend with computed revenue
         if group_by == "month":
             label_sql = "DATE_FORMAT(s.sale_date, '%Y-%m')"
         else:
@@ -2061,7 +2035,7 @@ def sales_analytics():
         chart_labels = [str(r["label"]) for r in trend_rows]
         chart_values = [float(r["revenue"]) for r in trend_rows]
 
-        # ✅ FIXED: Top categories with computed revenue
+        #  Top categories with computed revenue
         cur.execute(f"""
             SELECT
                 c.category_name,
@@ -2101,8 +2075,54 @@ def sales_analytics():
         cur.close()
         conn.close()
 
+@app.route("/reports/employee-attendance")
+@login_required
+@role_required("admin")
+def employee_attendance_report():
+    day = request.args.get("date")
+    if not day:
+        day = date.today().strftime("%Y-%m-%d")
 
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
 
+    #  Compute hours_worked and daily_salary in SELECT
+    cur.execute("""
+        SELECT
+            u.full_name,
+            u.email,
+            DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
+            DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
+            CASE 
+                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60, 2)
+            END AS hours_worked,
+            CASE 
+                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60 * e.hourly_rate, 2)
+            END AS daily_salary,
+            CASE
+                WHEN a.check_in IS NULL THEN 'Not checked in'
+                WHEN a.check_out IS NULL THEN 'Working'
+                ELSE 'Checked out'
+            END AS status
+        FROM users u
+        LEFT JOIN employee_attendance a
+            ON a.user_id = u.user_id AND a.work_date = %s
+        LEFT JOIN employee e ON e.user_id = u.user_id
+        WHERE u.role = 'employee'
+        ORDER BY u.full_name
+    """, (day,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("report_employee_attendance.html", rows=rows, day=day)
+# ============================================================
+# SECTION 7: Stock Movement History
+# ============================================================
 
 @app.route("/stock-movements")
 @role_required("admin", "employee")
@@ -2214,7 +2234,7 @@ def stock_movements():
         print("stock_movements error:", e)
 
 # =========================================================
-# OPTIONAL: Inventory transfer history
+#  Inventory transfer history
 # =========================================================
 
 @app.route('/transfers')
@@ -2301,104 +2321,10 @@ def transfers_list():
     finally:
         cur.close()
         conn.close()
-# =========================================================
-# UTILITY FUNCTIONS
-# =========================================================
 
-def check_warehouse_stock(warehouse_id, product_id):
-    """
-    Check available stock in warehouse for a product.
-    Returns the on_hand_qty or 0 if not found.
-    """
-    conn = get_connection()
-    if not conn:
-        return 0
-    
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT on_hand_qty
-            FROM warehouse_stock
-            WHERE warehouse_id = %s AND product_id = %s
-        """, (warehouse_id, product_id))
-        
-        result = cur.fetchone()
-        return result['on_hand_qty'] if result else 0
-    except Exception as e:
-        print(f"check_warehouse_stock error: {e}")
-        return 0
-    finally:
-        if conn.is_connected():
-            cur.close()
-            conn.close()
-
-
-def check_branch_stock(branch_id, product_id):
-    """
-    Check available stock in branch for a product.
-    Returns the on_hand_qty or 0 if not found.
-    """
-    conn = get_connection()
-    if not conn:
-        return 0
-    
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT on_hand_qty
-            FROM branch_stock
-            WHERE branch_id = %s AND product_id = %s
-        """, (branch_id, product_id))
-        
-        result = cur.fetchone()
-        return result['on_hand_qty'] if result else 0
-    except Exception as e:
-        print(f"check_branch_stock error: {e}")
-        return 0
-    finally:
-        if conn.is_connected():
-            cur.close()
-            conn.close()
-
-
-def get_warehouse_summary():
-    """
-    Get summary statistics for warehouse inventory.
-    """
-    conn = get_connection()
-    if not conn:
-        return None
-    
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute("""
-            SELECT
-                COUNT(DISTINCT ws.product_id) AS total_products,
-                SUM(ws.on_hand_qty) AS total_stock,
-                SUM(CASE WHEN ws.on_hand_qty <= ws.min_qty THEN 1 ELSE 0 END) AS low_stock_count,
-                SUM(CASE WHEN ws.on_hand_qty = 0 THEN 1 ELSE 0 END) AS out_of_stock_count
-            FROM warehouse_stock ws
-            JOIN product p ON ws.product_id = p.product_id
-            WHERE p.is_active = 1
-        """)
-        
-        return cur.fetchone()
-    except Exception as e:
-        print(f"get_warehouse_summary error: {e}")
-        return None
-    finally:
-        if conn.is_connected():
-            cur.close()
-            conn.close()
-###############Bookings#################  
-def calc_nights_and_discount(date_from, date_to):
-    # date_from/date_to are Python date objects
-    nights = (date_to - date_from).days
-    if nights <= 0:
-        return 0, 0.0
-    discount = 10.0 if nights > 10 else 0.0
-    return nights, discount
-
+# ============================================================
+# SECTION 9: Bookings Management
+# ============================================================
 @app.route("/booking/search")
 @role_required("customer", "admin", "employee")  # allow employees to use it too
 def booking_search():
@@ -2482,7 +2408,7 @@ def admin_bookings():
 
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-        # ✅ FIXED: Compute total_amount in SELECT
+        #  Compute total_amount in SELECT
         cur.execute(f"""
             SELECT
               b.booking_id, b.date_from, b.date_to, b.status, b.created_at,
@@ -2575,7 +2501,7 @@ def my_bookings():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ✅ FIXED: Compute total_amount in SELECT
+        #  Compute total_amount in SELECT
         cur.execute("""
             SELECT
               b.booking_id, b.date_from, b.date_to, b.status, b.created_at,
@@ -2588,7 +2514,7 @@ def my_bookings():
         """, (user_id,))
         bookings = cur.fetchall()
 
-        # ✅ FIXED: Compute line_total for each booking_room
+        #  Compute line_total for each booking_room
         for bk in bookings:
             cur.execute("""
                 SELECT 
@@ -2609,9 +2535,6 @@ def my_bookings():
         cur.close()
         conn.close()
 
-
-
-from datetime import datetime
 
 @app.route("/booking/new", methods=["GET", "POST"])
 @role_required("customer", "admin", "employee")
@@ -2738,14 +2661,14 @@ def booking_new():
             customer_id = user_id
             created_by = user_id
 
-            # ✅ FIXED: Remove total_amount from INSERT
+            #  Remove total_amount from INSERT
             cur.execute("""
                 INSERT INTO booking (customer_id, date_from, date_to, status, created_by)
                 VALUES (%s, %s, %s, 'PENDING', %s)
             """, (customer_id, date_from, date_to, created_by))
             booking_id = cur.lastrowid
 
-            # ✅ FIXED: Remove line_total from INSERT
+            #  Remove line_total from INSERT
             for i in range(len(selected_cat_ids)):
                 cur.execute("""
                     INSERT INTO booking_room
@@ -2873,7 +2796,7 @@ def bookings_today():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ✅ Check-ins today (start date = today)
+        #  Check-ins today (start date = today)
         cur.execute("""
             SELECT
                 b.booking_id,
@@ -2902,7 +2825,7 @@ def bookings_today():
             """, (bk["booking_id"],))
             bk["lines"] = cur.fetchall()
 
-        # ✅ Check-outs today (end date = today)
+        #  Check-outs today (end date = today)
         cur.execute("""
             SELECT
                 b.booking_id,
@@ -3113,7 +3036,7 @@ def occupancy_analytics():
 
 
 # ============================================================
-# SECTION 1: EMPLOYEE ATTENDANCE ROUTES
+# SECTION 10: EMPLOYEE ATTENDANCE ROUTES
 # ============================================================
 
 @app.route("/employee/check-in", methods=["POST"])
@@ -3125,7 +3048,7 @@ def employee_check_in():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
 
-    # ✅ FIXED: Only insert check_in timestamp, no computed columns
+    #  Only insert check_in timestamp, no computed columns
     cur.execute("""
         INSERT INTO employee_attendance (user_id, work_date, check_in)
         VALUES (%s, %s, NOW())
@@ -3163,14 +3086,14 @@ def employee_check_out():
         conn.close()
         return redirect(url_for("dashboard"))
 
-    # ✅ FIXED: Only update check_out timestamp
+    # Only update check_out timestamp
     cur.execute("""
         UPDATE employee_attendance
         SET check_out = NOW()
         WHERE attendance_id=%s
     """, (row["attendance_id"],))
 
-    # ✅ FIXED: Compute hours and salary for flash message (handle Decimal)
+    #  Compute hours and salary for flash message (handle Decimal)
     cur.execute("""
         SELECT 
             ROUND(TIMESTAMPDIFF(MINUTE, check_in, NOW())/60, 2) AS hours_worked,
@@ -3182,7 +3105,7 @@ def employee_check_out():
     
     result = cur.fetchone()
     
-    # ✅ Convert Decimal to float to avoid TypeError
+    #  Convert Decimal to float to avoid TypeError
     from decimal import Decimal
     
     if result:
@@ -3199,7 +3122,9 @@ def employee_check_out():
 
     flash(f"✅ Checked out! Hours: {hours_worked}, Salary: ${daily_salary}", "success")
     return redirect(url_for("dashboard"))
-
+# ============================================================
+# SECTION 11: Login, Signup, Logout Routes
+# ============================================================
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3313,20 +3238,8 @@ def logout():
     flash('You have been logged out successfully.', 'info')
     return redirect(url_for('login'))
 
-# ==================== ERROR HANDLERS ====================
-
-@app.errorhandler(404)
-def page_not_found(e):
-    return render_template('base.html', error='Page not found'), 404
-
-@app.errorhandler(500)
-def internal_error(e):
-    return render_template('base.html', error='Internal server error'), 500
-
-
-
 # ============================================================
-# SECTION 2: DASHBOARD - EMPLOYEE ATTENDANCE DISPLAY
+# SECTION 12: DASHBOARD - EMPLOYEE ATTENDANCE DISPLAY
 # ============================================================
 
 @app.route('/')
@@ -3363,7 +3276,7 @@ def dashboard():
                 cur.execute("SELECT COUNT(*) AS cnt FROM branch_stock WHERE on_hand_qty <= min_qty")
                 low_stock_count = cur.fetchone()["cnt"]
 
-            # ✅ FIXED: Today's sales with computed total_revenue
+            #  Today's sales with computed total_revenue
             if role in ['admin', 'employee']:
                 cur.execute("""
                     SELECT 
@@ -3375,7 +3288,7 @@ def dashboard():
                 """)
                 today_sales = cur.fetchone() or today_sales
 
-            # ✅ FIXED: Employee attendance with computed hours_worked and daily_salary
+            #  Employee attendance with computed hours_worked and daily_salary
             if role == 'employee':
                 cur.execute("""
                     SELECT 
@@ -3395,7 +3308,7 @@ def dashboard():
                 """, (user_id, date.today()))
                 today_attendance = cur.fetchone()
 
-            # ✅ FIXED: Admin employee status with computed columns
+            #  Admin employee status with computed columns
             if role == 'admin':
                 cur.execute("""
                     SELECT
@@ -3481,59 +3394,116 @@ def dashboard():
     )
 
 
-from flask import request, render_template
 
+# =========================================================
+# UTILITY FUNCTIONS
+# =========================================================
 
-# ============================================================
-# SECTION 3: EMPLOYEE ATTENDANCE REPORT
-# ============================================================
-
-@app.route("/reports/employee-attendance")
-@login_required
-@role_required("admin")
-def employee_attendance_report():
-    day = request.args.get("date")
-    if not day:
-        day = date.today().strftime("%Y-%m-%d")
-
+def check_warehouse_stock(warehouse_id, product_id):
+    """
+    Check available stock in warehouse for a product.
+    Returns the on_hand_qty or 0 if not found.
+    """
     conn = get_connection()
-    cur = conn.cursor(dictionary=True)
+    if not conn:
+        return 0
+    
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT on_hand_qty
+            FROM warehouse_stock
+            WHERE warehouse_id = %s AND product_id = %s
+        """, (warehouse_id, product_id))
+        
+        result = cur.fetchone()
+        return result['on_hand_qty'] if result else 0
+    except Exception as e:
+        print(f"check_warehouse_stock error: {e}")
+        return 0
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
 
-    # ✅ FIXED: Compute hours_worked and daily_salary in SELECT
-    cur.execute("""
-        SELECT
-            u.full_name,
-            u.email,
-            DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
-            DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
-            CASE 
-                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
-                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60, 2)
-            END AS hours_worked,
-            CASE 
-                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
-                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60 * e.hourly_rate, 2)
-            END AS daily_salary,
-            CASE
-                WHEN a.check_in IS NULL THEN 'Not checked in'
-                WHEN a.check_out IS NULL THEN 'Working'
-                ELSE 'Checked out'
-            END AS status
-        FROM users u
-        LEFT JOIN employee_attendance a
-            ON a.user_id = u.user_id AND a.work_date = %s
-        LEFT JOIN employee e ON e.user_id = u.user_id
-        WHERE u.role = 'employee'
-        ORDER BY u.full_name
-    """, (day,))
 
-    rows = cur.fetchall()
+def check_branch_stock(branch_id, product_id):
+    """
+    Check available stock in branch for a product.
+    Returns the on_hand_qty or 0 if not found.
+    """
+    conn = get_connection()
+    if not conn:
+        return 0
+    
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT on_hand_qty
+            FROM branch_stock
+            WHERE branch_id = %s AND product_id = %s
+        """, (branch_id, product_id))
+        
+        result = cur.fetchone()
+        return result['on_hand_qty'] if result else 0
+    except Exception as e:
+        print(f"check_branch_stock error: {e}")
+        return 0
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
 
-    cur.close()
-    conn.close()
 
-    return render_template("report_employee_attendance.html", rows=rows, day=day)
+def get_warehouse_summary():
+    """
+    Get summary statistics for warehouse inventory.
+    """
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT
+                COUNT(DISTINCT ws.product_id) AS total_products,
+                SUM(ws.on_hand_qty) AS total_stock,
+                SUM(CASE WHEN ws.on_hand_qty <= ws.min_qty THEN 1 ELSE 0 END) AS low_stock_count,
+                SUM(CASE WHEN ws.on_hand_qty = 0 THEN 1 ELSE 0 END) AS out_of_stock_count
+            FROM warehouse_stock ws
+            JOIN product p ON ws.product_id = p.product_id
+            WHERE p.is_active = 1
+        """)
+        
+        return cur.fetchone()
+    except Exception as e:
+        print(f"get_warehouse_summary error: {e}")
+        return None
+    finally:
+        if conn.is_connected():
+            cur.close()
+            conn.close()
 
+# ==================== ERROR HANDLERS ====================
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('base.html', error='Page not found'), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    return render_template('base.html', error='Internal server error'), 500
+
+
+
+def calc_nights_and_discount(date_from, date_to):
+    # date_from/date_to are Python date objects
+    nights = (date_to - date_from).days
+    if nights <= 0:
+        return 0, 0.0
+    discount = 10.0 if nights > 10 else 0.0
+    return nights, discount
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
