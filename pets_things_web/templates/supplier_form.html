@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Add Supplier' if mode == 'add' else 'Edit Supplier' }} - Pets & Things{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">🏢</span>
+        {{ 'Add Supplier' if mode == 'add' else 'Edit Supplier' }}
+      </h1>
+      <p class="page-subtitle">Enter supplier details used for purchases</p>
+    </div>
+  </div>
+</section>
+
+<!-- Form Section -->
+<section class="form-section">
+  <div class="form-container">
+    <div class="form-card">
+
+      {% if error %}
+      <div class="error-message">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" class="product-form">
+        <!-- Supplier Name -->
+        <div class="form-group">
+          <label for="name" class="form-label">Supplier Name</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🏷️</span>
+            <input
+              type="text"
+              id="name"
+              name="name"
+              class="form-input"
+              placeholder="Enter supplier name"
+              value="{{ supplier.name if supplier else '' }}"
+              required
+            >
+          </div>
+        </div>
+
+        <!-- Contact -->
+        <div class="form-group">
+          <label for="contact" class="form-label">Contact</label>
+          <div class="input-wrapper">
+            <span class="input-icon">📞</span>
+            <input
+              type="text"
+              id="contact"
+              name="contact"
+              class="form-input"
+              placeholder="Phone / Email (optional)"
+              value="{{ supplier.contact if supplier else '' }}"
+            >
+          </div>
+        </div>
+
+        <!-- Address -->
+        <div class="form-group">
+          <label for="address" class="form-label">Address</label>
+          <div class="input-wrapper textarea-wrapper">
+            <span class="input-icon textarea-icon">📍</span>
+            <textarea
+              id="address"
+              name="address"
+              class="form-input form-textarea"
+              placeholder="Supplier address (optional)"
+              rows="3"
+            >{{ supplier.address if supplier else '' }}</textarea>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="form-actions">
+          <a href="{{ url_for('suppliers_list') }}" class="btn-secondary">
+            <span class="btn-icon">✕</span>
+            Cancel
+          </a>
+
+          <button type="submit" class="btn-primary btn-submit">
+            <span class="btn-icon">💾</span>
+            Save Supplier
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</section>
+{% endblock %}

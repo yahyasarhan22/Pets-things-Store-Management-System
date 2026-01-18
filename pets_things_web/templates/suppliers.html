@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Suppliers - Pets & Things{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section class="page-header">
+  <div class="page-header-content">
+    <div class="page-title-section">
+      <h1 class="page-title">
+        <span class="title-icon">🏢</span>
+        Suppliers
+      </h1>
+      <p class="page-subtitle">Manage suppliers for purchases</p>
+    </div>
+
+    <div class="header-actions">
+      <a href="{{ url_for('supplier_add') }}" class="btn-primary">
+        <span class="btn-icon">+</span>
+        Add Supplier
+      </a>
+      <a href="{{ url_for('purchase_new') }}" class="btn-secondary">
+        🧾 New Purchase
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="products-section">
+  <div class="products-container">
+
+    {% if error %}
+      <div class="error-message">
+        <span class="error-icon">⚠️</span>
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if suppliers and suppliers|length > 0 %}
+      <div class="table-card">
+        <div class="table-wrapper">
+          <table class="products-table">
+            <thead>
+              <tr>
+                <th>
+                  <span class="th-content">
+                    <span class="th-icon">🏷️</span>
+                    Name
+                  </span>
+                </th>
+                <th>
+                  <span class="th-content">
+                    <span class="th-icon">📞</span>
+                    Contact
+                  </span>
+                </th>
+                <th>
+                  <span class="th-content">
+                    <span class="th-icon">📍</span>
+                    Address
+                  </span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in suppliers %}
+              <tr>
+                <td class="product-name-cell">
+                  <span class="product-name">{{ s.name }}</span>
+                </td>
+                <td>{{ s.contact or '--' }}</td>
+                <td>{{ s.address or '--' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">🏢</div>
+        <h2 class="empty-title">No Suppliers Yet</h2>
+        <p class="empty-text">Add suppliers to start purchasing stock from them.</p>
+        <a href="{{ url_for('supplier_add') }}" class="btn-primary">
+          <span class="btn-icon">+</span>
+          Add Your First Supplier
+        </a>
+      </div>
+    {% endif %}
+
+  </div>
+</section>
+{% endblock %}

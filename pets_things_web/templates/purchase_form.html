@@ -47,23 +47,36 @@
             <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Select the warehouse receiving this purchase</p>
           </div>
 
-          <!-- Supplier Name -->
+          <!-- ✅ Supplier Dropdown -->
           <div class="form-group">
-            <label class="form-label" for="supplier_name">
-              <span style="color: var(--error-color);">*</span> Supplier Name
+            <label class="form-label" for="supplier_id">
+              <span style="color: var(--error-color);">*</span> Supplier
             </label>
+
             <div class="input-wrapper">
               <span class="input-icon">🏢</span>
-              <input type="text" 
-                     class="form-input" 
-                     id="supplier_name" 
-                     name="supplier_name" 
-                     placeholder="Enter supplier name"
-                     value="{{ supplier_name }}"
-                     required
-                     style="padding-left: 40px;">
+              <select class="form-input" id="supplier_id" name="supplier_id" required style="padding-left: 40px;">
+                <option value="">Select supplier</option>
+                {% for s in suppliers %}
+                  <option value="{{ s.supplier_id }}" {% if selected_supplier_id == s.supplier_id %}selected{% endif %}>
+                    {{ s.name }}
+                  </option>
+                {% endfor %}
+              </select>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">Enter the name of the supplier</p>
+
+            <div style="margin-top: 12px; display:flex; gap: 10px; flex-wrap: wrap;">
+              <a href="{{ url_for('supplier_add') }}" class="btn-secondary" style="padding:10px 14px; display:inline-flex; align-items:center; gap:8px;">
+                <span>➕</span> Add Supplier
+              </a>
+              <a href="{{ url_for('suppliers_list') }}" class="btn-secondary" style="padding:10px 14px; display:inline-flex; align-items:center; gap:8px;">
+                <span>📋</span> View Suppliers
+              </a>
+            </div>
+
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 6px;">
+              Choose supplier for this purchase (or add a new one).
+            </p>
           </div>
 
           <!-- Form Actions -->

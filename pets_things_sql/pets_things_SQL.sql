@@ -155,7 +155,26 @@ CREATE TABLE purchase (
   CONSTRAINT fk_purchase_user
     FOREIGN KEY (performed_by) REFERENCES users(user_id)
 );
+ALTER TABLE purchase
+ADD COLUMN supplier_id INT NULL;
 
+ALTER TABLE purchase
+ADD CONSTRAINT fk_purchase_supplier
+FOREIGN KEY (supplier_id) REFERENCES supplier(supplier_id);
+-- ---------------------
+INSERT INTO supplier (name)
+SELECT DISTINCT supplier_name
+FROM purchase
+WHERE supplier_name IS NOT NULL AND supplier_name <> ''
+  AND supplier_name NOT IN (SELECT name FROM supplier);
+
+UPDATE purchase p
+JOIN supplier s ON s.name = p.supplier_name
+SET p.supplier_id = s.supplier_id
+WHERE p.supplier_id IS NULL;
+
+
+-------------- 
 CREATE TABLE purchase_line (
   purchase_line_id INT AUTO_INCREMENT PRIMARY KEY,
   purchase_id INT NOT NULL,
@@ -170,6 +189,14 @@ CREATE TABLE purchase_line (
     FOREIGN KEY (product_id) REFERENCES product(product_id),
   CONSTRAINT chk_purchase_line_qty
     CHECK (quantity > 0)
+);
+
+CREATE TABLE supplier (
+  supplier_id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  contact VARCHAR(120),
+  address VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
@@ -360,3 +387,4 @@ INSERT INTO room (room_number, room_type, is_active)
 VALUES ('R01','Standard',1),('R02','Standard',1),('R03','Standard',1),('R04','Standard',1),('R05','Standard',1);
 
 select * from users;
+select * from supplier;

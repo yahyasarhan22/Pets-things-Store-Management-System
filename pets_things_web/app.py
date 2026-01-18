@@ -797,59 +797,90 @@ def transfer_stock():
 @app.route('/purchases/new', methods=['GET', 'POST'])
 @role_required('admin', 'employee')
 def purchase_new():
-    """Create new purchase from supplier to warehouse."""
     conn = get_connection()
     if not conn:
         flash("Database connection failed.", "danger")
         return redirect(url_for('dashboard'))
 
-    try:
-        cur = conn.cursor(dictionary=True)
+    cur = conn.cursor(dictionary=True)
 
-        # Load warehouses and products
+    try:
+        # Dropdown data
         cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
         warehouses = cur.fetchall()
 
+        cur.execute("SELECT supplier_id, name FROM supplier ORDER BY name")
+        suppliers = cur.fetchall()
+
+        # (not required on this page, but you already use it elsewhere)
         cur.execute("SELECT product_id, product_name, unit_price FROM product WHERE is_active = 1 ORDER BY product_name")
         products = cur.fetchall()
 
         if request.method == 'POST':
             warehouse_id = request.form.get('warehouse_id', type=int)
-            supplier_name = (request.form.get('supplier_name') or '').strip()
+            supplier_id = request.form.get('supplier_id', type=int)
 
-            if not warehouse_id or not supplier_name:
-                flash("Please select warehouse and enter supplier name.", "warning")
+            if not warehouse_id or not supplier_id:
+                flash("Please select warehouse and supplier.", "warning")
                 return render_template('purchase_form.html',
-                                     warehouses=warehouses,
-                                     products=products,
-                                     selected_warehouse_id=warehouse_id,
-                                     supplier_name=supplier_name)
+                                       warehouses=warehouses,
+                                       suppliers=suppliers,
+                                       products=products,
+                                       selected_warehouse_id=warehouse_id,
+                                       selected_supplier_id=supplier_id)
 
             performed_by = session.get('user_id')
 
-            # Create purchase header
-            cur.execute("""
-                INSERT INTO purchase (warehouse_id, supplier_name, total_amount, performed_by)
-                VALUES (%s, %s, 0.00, %s)
-            """, (warehouse_id, supplier_name, performed_by))
-            
-            purchase_id = cur.lastrowid
-            conn.commit()
+            # Get supplier name (snapshot, optional if you keep purchase.supplier_name)
+            cur.execute("SELECT name FROM supplier WHERE supplier_id = %s", (supplier_id,))
+            sup = cur.fetchone()
+            if not sup:
+                flash("Selected supplier not found.", "warning")
+                return render_template('purchase_form.html',
+                                       warehouses=warehouses,
+                                       suppliers=suppliers,
+                                       products=products,
+                                       selected_warehouse_id=warehouse_id,
+                                       selected_supplier_id=supplier_id)
 
-            flash("Purchase created. Add items now.", "success")
-            return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+            supplier_name = sup["name"]
 
+            try:
+                cur.execute("""
+                    INSERT INTO purchase (warehouse_id, supplier_id, supplier_name, total_amount, performed_by)
+                    VALUES (%s, %s, %s, 0.00, %s)
+                """, (warehouse_id, supplier_id, supplier_name, performed_by))
+
+                purchase_id = cur.lastrowid
+                conn.commit()
+
+                flash("Purchase created. Add items now.", "success")
+                return redirect(url_for('purchase_detail', purchase_id=purchase_id))
+
+            except Exception as e:
+                conn.rollback()
+                print("purchase_new insert error:", e)
+                flash("Failed to create purchase. Please try again.", "danger")
+                return render_template('purchase_form.html',
+                                       warehouses=warehouses,
+                                       suppliers=suppliers,
+                                       products=products,
+                                       selected_warehouse_id=warehouse_id,
+                                       selected_supplier_id=supplier_id)
+
+        # GET
         return render_template('purchase_form.html',
-                             warehouses=warehouses,
-                             products=products,
-                             selected_warehouse_id=None,
-                             supplier_name='')
+                               warehouses=warehouses,
+                               suppliers=suppliers,
+                               products=products,
+                               selected_warehouse_id=None,
+                               selected_supplier_id=None)
 
     finally:
-        if cur:
-            cur.close()
-        if conn and conn.is_connected():
-            conn.close()
+        cur.close()
+        conn.close()
+
+
 
 
 @app.route('/purchases/<int:purchase_id>')
@@ -866,20 +897,22 @@ def purchase_detail(purchase_id):
 
         # Get purchase header
         cur.execute("""
-            SELECT
-                p.purchase_id,
-                p.warehouse_id,
-                w.warehouse_name,
-                p.purchase_date,
-                p.supplier_name,
-                p.total_amount,
-                p.performed_by,
-                u.full_name AS performed_by_name
-            FROM purchase p
-            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-            JOIN users u ON p.performed_by = u.user_id
-            WHERE p.purchase_id = %s
-        """, (purchase_id,))
+    SELECT
+        p.purchase_id,
+        p.warehouse_id,
+        w.warehouse_name,
+        p.purchase_date,
+        COALESCE(s.name, p.supplier_name) AS supplier_name,
+        p.total_amount,
+        p.performed_by,
+        u.full_name AS performed_by_name
+    FROM purchase p
+    JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+    JOIN users u ON p.performed_by = u.user_id
+    LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+    WHERE p.purchase_id = %s
+""", (purchase_id,))
+
         
         purchase = cur.fetchone()
         if not purchase:
@@ -1110,19 +1143,23 @@ def purchases_list():
             where_clause = "WHERE " + " AND ".join(conditions)
 
         cur.execute(f"""
-            SELECT
-                p.purchase_id,
-                p.purchase_date,
-                w.warehouse_name,
-                p.supplier_name,
-                p.total_amount,
-                u.full_name AS performed_by_name
-            FROM purchase p
-            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-            JOIN users u ON p.performed_by = u.user_id
-            {where_clause}
-            ORDER BY p.purchase_date DESC
-        """, params)
+    SELECT
+        p.purchase_id,
+        p.purchase_date,
+        w.warehouse_name,
+        p.supplier_id,
+        COALESCE(s.name, p.supplier_name, 'Unknown') AS supplier_name,
+        p.total_amount,
+        u.full_name AS performed_by_name
+    FROM purchase p
+    JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+    JOIN users u ON p.performed_by = u.user_id
+    LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+    {where_clause}
+    ORDER BY p.purchase_date DESC
+""", params)
+
+
 
         purchases = cur.fetchall()
 
@@ -1140,6 +1177,58 @@ def purchases_list():
         cur.close()
         conn.close()
 
+@app.route("/suppliers")
+@role_required("admin", "employee")
+def suppliers_list():
+    conn = get_connection()
+    if not conn:
+        return render_template("suppliers.html", suppliers=[], error="DB connection failed")
+
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT supplier_id, name, contact, address
+            FROM supplier
+            ORDER BY name
+        """)
+        suppliers = cur.fetchall()
+        return render_template("suppliers.html", suppliers=suppliers, error=None)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/suppliers/add", methods=["GET", "POST"])
+@role_required("admin", "employee")
+def supplier_add():
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        contact = (request.form.get("contact") or "").strip()
+        address = (request.form.get("address") or "").strip()
+
+        if not name:
+            flash("Supplier name is required.", "warning")
+            return render_template("supplier_form.html", mode="add", supplier=None)
+
+        conn = get_connection()
+        if not conn:
+            flash("DB connection failed.", "danger")
+            return render_template("supplier_form.html", mode="add", supplier=None)
+
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO supplier (name, contact, address)
+                VALUES (%s, %s, %s)
+            """, (name, contact or None, address or None))
+            conn.commit()
+            flash("Supplier added successfully.", "success")
+            return redirect(url_for("purchase_new"))  # go back to purchase page
+        finally:
+            cur.close()
+            conn.close()
+
+    return render_template("supplier_form.html", mode="add", supplier=None)
 
 
 @app.route('/inventory/restock', methods=['POST'])
