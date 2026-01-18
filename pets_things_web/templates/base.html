@@ -29,7 +29,8 @@
 
             <!-- Navigation Links -->
             <ul class="navbar-menu" id="navbar-menu">
-                <!-- Products dropdown -->
+
+                <!-- Products dropdown (for everyone) -->
                 <li class="nav-dropdown">
                     <a href="/products" class="navbar-link dropdown-trigger {% if '/products' in request.path %}active{% endif %}">
                         Products
@@ -55,8 +56,11 @@
                     </ul>
                 </li>
                 {% endif %}
-                
+
+                <!-- Sales link ONLY for admin/employee -->
+                {% if session.get('role') in ['admin', 'employee'] %}
                 <li><a href="/sales" class="navbar-link {% if request.path == '/sales' %}active{% endif %}">Sales</a></li>
+                {% endif %}
                 
                 <!-- Purchases link for admin/employee -->
                 {% if session.get('role') in ['admin', 'employee'] %}
@@ -76,6 +80,7 @@
                     </ul>
                 </li>
                 {% else %}
+                <!-- Customer Bookings (simple link) -->
                 <li><a href="/bookings" class="navbar-link {% if request.path == '/bookings' %}active{% endif %}">Bookings</a></li>
                 {% endif %}
                 
@@ -90,8 +95,6 @@
                         <li><a href="/reports/sales-analytics" class="dropdown-link">Sales Analytics</a></li>
                         <li><a href="/reports/top-products" class="dropdown-link">Top Products</a></li>
                         <li><a href="{{ url_for('occupancy_analytics') }}" class="dropdown-link">Occupancy Analytics</a></li>
-
-
                     </ul>
                 </li>
                 {% endif %}

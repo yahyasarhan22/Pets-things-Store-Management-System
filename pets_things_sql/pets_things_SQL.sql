@@ -336,6 +336,11 @@ CREATE TABLE booking_room (
 INSERT INTO users (full_name, email, password_hash, role)
 VALUES ('Owner Admin', 'admin@pets.com', 'TEMP_HASH', 'admin');
 
+INSERT INTO users (full_name, email, password_hash, role)
+VALUES ('Employee1', 'Employee@pets.com', 'TEMP_HASH1', 'employee');
+INSERT INTO users (full_name, email, password_hash, role)
+VALUES ('Employee2', 'Employee2@pets.com', 'TEMP_HASH2', 'employee');
+select * from users;
 -- Categories
 INSERT INTO category (category_name) VALUES
 ('Pet Food'),

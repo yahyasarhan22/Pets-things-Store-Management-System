@@ -13,11 +13,22 @@
             class="hero-paw"
         >
         <h1 class="hero-title">
-            Welcome, {{ role|default('User') }}!
+            Welcome, {{ full_name or role|default('User') }}!
         </h1>
-        <p class="hero-subtitle">Manage your pet store with ease</p>
+        <p class="hero-subtitle">
+            {% if session.get('role') == 'customer' %}
+                Browse products and manage your bookings easily
+            {% else %}
+                Manage your pet store with ease
+            {% endif %}
+        </p>
     </div>
 </section>
+
+{# =========================
+   ADMIN / EMPLOYEE DASHBOARD
+   ========================= #}
+{% if session.get('role') in ['admin', 'employee'] %}
 
 <!-- KPI Cards Section -->
 <section class="dashboard-stats">
@@ -32,7 +43,9 @@
             </div>
         </div>
 
-        <a href="{{ url_for('inventory', status='LOW') }}" class="stat-card stat-card-low-stock {% if low_stock_count and low_stock_count > 0 %}stat-card-alert{% endif %}" style="cursor: pointer; text-decoration: none; color: inherit;">
+        <a href="{{ url_for('inventory', status='LOW') }}"
+           class="stat-card stat-card-low-stock {% if low_stock_count and low_stock_count > 0 %}stat-card-alert{% endif %}"
+           style="cursor: pointer; text-decoration: none; color: inherit;">
             <div class="stat-icon stat-icon-stock">
                 <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Low Stock">
             </div>
@@ -54,8 +67,12 @@
             <div class="stat-info">
                 {% if today_sales %}
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-size: 0.85rem; color: var(--text-secondary);">{{ today_sales.total_sales|default(0) }} sales</div>
-                        <span class="stat-value" style="font-size: 1.8rem;">${{ "%.2f"|format(today_sales.total_revenue or 0) }}</span>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                            {{ today_sales.total_sales|default(0) }} sales
+                        </div>
+                        <span class="stat-value" style="font-size: 1.8rem;">
+                            ${{ "%.2f"|format(today_sales.total_revenue or 0) }}
+                        </span>
                     </div>
                 {% else %}
                     <span class="stat-value">--</span>
@@ -98,4 +115,38 @@
         </a>
     </div>
 </section>
+
+{# =================
+   CUSTOMER DASHBOARD
+   ================= #}
+{% else %}
+
+<section class="dashboard-actions" style="padding-top: 40px;">
+    <h2 class="section-title">Quick Actions</h2>
+    <div class="actions-container" style="grid-template-columns: repeat(2, 1fr);">
+        
+        <a href="/products/active" class="action-card">
+            <div class="action-icon">🛍️</div>
+            <span class="action-label">Browse Products</span>
+        </a>
+
+        <a href="/bookings/new" class="action-card">
+            <div class="action-icon">📅</div>
+            <span class="action-label">New Booking</span>
+        </a>
+
+        <a href="/bookings" class="action-card">
+            <div class="action-icon">📖</div>
+            <span class="action-label">My Bookings</span>
+        </a>
+
+        <a href="/products" class="action-card">
+            <div class="action-icon">🔎</div>
+            <span class="action-label">All Products</span>
+        </a>
+
+    </div>
+</section>
+
+{% endif %}
 {% endblock %}
