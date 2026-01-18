@@ -28,6 +28,24 @@ def allowed_file(filename):
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # ==================== DECORATORS ====================
+from decimal import Decimal
+
+def to_float(value):
+    """Convert Decimal or any numeric type to float safely"""
+    if value is None:
+        return 0.0
+    if isinstance(value, Decimal):
+        return float(value)
+    return float(value)
+
+def to_int(value):
+    """Convert Decimal or any numeric type to int safely"""
+    if value is None:
+        return 0
+    if isinstance(value, Decimal):
+        return int(value)
+    return int(value)
+
 
 def login_required(f):
     """
@@ -1474,7 +1492,6 @@ def sale_detail(sale_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute("""
             SELECT
                 s.sale_id,
@@ -1509,7 +1526,6 @@ def sale_detail(sale_id):
         """)
         products = cur.fetchall()
 
-        # ✅ FIXED: Compute line_total in SELECT
         cur.execute("""
             SELECT
                 sl.sale_line_id,
@@ -1525,7 +1541,10 @@ def sale_detail(sale_id):
         """, (sale_id,))
         lines = cur.fetchall()
 
-        total = sum(float(l["line_total"]) for l in lines) if lines else 0.0
+        # ✅ FIX: Convert Decimal to float for computation
+        from decimal import Decimal
+        total = sum(float(l["line_total"]) if isinstance(l["line_total"], Decimal) else l["line_total"] 
+                    for l in lines) if lines else 0.0
 
         return render_template(
             "sale_detail.html",
@@ -1699,6 +1718,7 @@ def sale_complete(sale_id):
 
         for line in lines:
             pid = line["product_id"]
+            # ✅ FIX: Convert to int to avoid Decimal issues
             qty = int(line["quantity"])
 
             cur.execute("""
@@ -1732,7 +1752,6 @@ def sale_complete(sale_id):
                 VALUES (%s, %s, %s, 'SALE', %s, %s)
             """, (branch_id, pid, -qty, sale_id, performed_by))
 
-        # ✅ FIXED: No need to update total_amount (it's computed)
         conn.commit()
         flash("Sale completed successfully. Stock updated.", "success")
         return redirect(url_for("sales_list"))
@@ -3144,14 +3163,14 @@ def employee_check_out():
         conn.close()
         return redirect(url_for("dashboard"))
 
-    # ✅ FIXED: Only update check_out timestamp, no computed columns
+    # ✅ FIXED: Only update check_out timestamp
     cur.execute("""
         UPDATE employee_attendance
         SET check_out = NOW()
         WHERE attendance_id=%s
     """, (row["attendance_id"],))
 
-    # ✅ Compute hours and salary for flash message only (not stored)
+    # ✅ FIXED: Compute hours and salary for flash message (handle Decimal)
     cur.execute("""
         SELECT 
             ROUND(TIMESTAMPDIFF(MINUTE, check_in, NOW())/60, 2) AS hours_worked,
@@ -3162,9 +3181,17 @@ def employee_check_out():
     """, (row["attendance_id"],))
     
     result = cur.fetchone()
-    hours_worked = result['hours_worked'] if result else 0
-    hourly_rate = result['hourly_rate'] if result else 0
-    daily_salary = round(hours_worked * float(hourly_rate), 2)
+    
+    # ✅ Convert Decimal to float to avoid TypeError
+    from decimal import Decimal
+    
+    if result:
+        hours_worked = float(result['hours_worked']) if result['hours_worked'] else 0.0
+        hourly_rate = float(result['hourly_rate']) if result['hourly_rate'] else 0.0
+        daily_salary = round(hours_worked * hourly_rate, 2)
+    else:
+        hours_worked = 0.0
+        daily_salary = 0.0
 
     conn.commit()
     cur.close()
