@@ -426,6 +426,15 @@ body {
   padding: 20px 20px 60px;
 }
 
+.dashboard-actions .section-title {
+  max-width: 1200px;
+  margin: 0 auto 24px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 0 20px;
+}
+
 .section-title {
   max-width: 1200px;
   margin: 0 auto 24px;
@@ -1890,9 +1899,219 @@ body {
 }
 
 /* =========================================
-   Responsive Design
+   Product Thumbnail
    ========================================= */
 
+.product-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.product-thumb.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+/* =========================================
+   Report Filter Styles
+   ========================================= */
+
+/* Report filter row */
+.report-filter-row {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 24px;
+  background: var(--card-background);
+  border-radius: 16px;
+  box-shadow: 0 4px 15px var(--shadow-color);
+}
+
+/* Also style form elements outside of .report-filter-row if needed */
+.dashboard-actions form:not(.report-filter-row) {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--card-background);
+  border-radius: 16px;
+  box-shadow: 0 4px 15px var(--shadow-color);
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.report-filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-filter-label,
+.dashboard-actions label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  display: block;
+}
+
+.report-filter-input,
+.dashboard-actions input[type="date"] {
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 2px solid var(--border-color);
+  background: #faf8f5;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text-primary);
+  outline: none;
+  transition: all 0.25s ease;
+  min-width: 180px;
+}
+
+.report-filter-input:hover,
+.dashboard-actions input[type="date"]:hover {
+  border-color: #d0c5b8;
+}
+
+.report-filter-input:focus,
+.dashboard-actions input[type="date"]:focus {
+  border-color: var(--input-focus);
+  background: var(--card-background);
+  box-shadow: 0 0 0 3px rgba(243, 156, 18, 0.1);
+}
+
+.report-filter-btn,
+.dashboard-actions button[type="submit"] {
+  padding: 12px 24px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+  color: #ffffff;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 12px rgba(230, 126, 34, 0.3);
+}
+
+.report-filter-btn:hover,
+.dashboard-actions button[type="submit"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(230, 126, 34, 0.4);
+}
+
+/* =========================================
+   Status Badges
+   ========================================= */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.badge-success {
+  background: rgba(34, 197, 94, 0.14);
+  color: #0f7a33;
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.badge-info {
+  background: rgba(59, 130, 246, 0.14);
+  color: #1f4fbf;
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.badge-muted {
+  background: rgba(148, 163, 184, 0.18);
+  color: #475569;
+border-color: rgba(148, 163, 184, 0.30);
+}
+
+/* =========================================
+   Employee Card Details
+   ========================================= */
+.stat-card-employee {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 28px;
+}
+
+.stat-card-employee .stat-icon {
+  align-self: flex-start;
+  margin-bottom: 16px;
+}
+
+.stat-card-employee .stat-info {
+  width: 100%;
+}
+
+.emp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.emp-name {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+
+.emp-email {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.emp-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  font-size: 0.95rem;
+}
+
+.emp-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emp-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.emp-meta b {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+/* =========================================
+   Responsive Design
+   ========================================= */
 @media (max-width: 1200px) {
   .stats-container,
   .actions-container {
@@ -1933,7 +2152,7 @@ body {
     transform: none;
     box-shadow: none;
     border: none;
-    background: #f8f5f1;
+    background: #f8f5f1; /* ✅ fixed (removed backticks) */
     margin-top: 5px;
     border-radius: 8px;
     display: none;
@@ -2048,6 +2267,12 @@ body {
   }
 }
 
+@media (max-width: 700px) {
+  .emp-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 480px) {
   .login-card {
     padding: 25px 20px;
@@ -2088,55 +2313,4 @@ body {
   .inv-card-value {
     font-size: 1.5rem;
   }
-  .product-thumb {
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
-  object-fit: cover;
-  border: 1px solid var(--border-color);
-  background: #fff;
 }
-
-.product-thumb.placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-}
-
-/* Status badges */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-
-.badge-success {
-  background: rgba(34, 197, 94, 0.14);
-  color: #0f7a33;
-  border-color: rgba(34, 197, 94, 0.25);
-}
-
-.badge-info {
-  background: rgba(59, 130, 246, 0.14);
-  color: #1f4fbf;
-  border-color: rgba(59, 130, 246, 0.25);
-}
-
-.badge-muted {
-  background: rgba(148, 163, 184, 0.18);
-  color: #475569;
-  border-color: rgba(148, 163, 184, 0.30);
-}
-
-
-
-}
-
-
-

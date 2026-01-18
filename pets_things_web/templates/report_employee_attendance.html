@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Employee Attendance Report{% endblock %}
+
+{% block content %}
+<!-- Hero Banner (same style as dashboard) -->
+<section class="dashboard-hero" style="min-height: 170px;">
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Paw icon" class="hero-paw">
+    <h1 class="hero-title">Employee Attendance</h1>
+    <p class="hero-subtitle">Daily attendance status (check-in / check-out / hours / salary)</p>
+  </div>
+</section>
+
+<!-- Filter -->
+<section class="dashboard-actions" style="padding-top: 18px;">
+  <h2 class="section-title">Filter</h2>
+
+  <form method="GET" class="report-filter-row">
+    <div class="report-filter-item">
+      <label class="report-filter-label">Date</label>
+      <input type="date" name="date" value="{{ day }}" class="report-filter-input">
+    </div>
+    <button type="submit" class="report-filter-btn">View</button>
+  </form>
+</section>
+
+<!-- Cards (Reuse your stat-card UI so it always looks good) -->
+<section class="dashboard-stats">
+  <div class="stats-container">
+    {% for e in rows %}
+
+      <div class="stat-card stat-card-employee">
+        <div class="stat-icon stat-icon-products">
+          <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Employee">
+        </div>
+
+        <div class="stat-info">
+          <div class="emp-head">
+            <div class="emp-name">{{ e.full_name }}</div>
+
+            {% if e.status == 'Working' %}
+              <span class="badge badge-success">Working</span>
+            {% elif e.status == 'Checked out' %}
+              <span class="badge badge-info">Checked out</span>
+            {% else %}
+              <span class="badge badge-muted">Not checked in</span>
+            {% endif %}
+          </div>
+
+          <div class="emp-email">{{ e.email }}</div>
+
+          <div class="emp-meta">
+            <div><span class="emp-label">Check In:</span> <b>{{ e.check_in or '--' }}</b></div>
+            <div><span class="emp-label">Check Out:</span> <b>{{ e.check_out or '--' }}</b></div>
+            <div><span class="emp-label">Hours:</span> <b>{{ e.hours_worked if e.hours_worked is not none else 0 }}</b></div>
+            <div><span class="emp-label">Salary:</span> <b>${{ "%.2f"|format(e.daily_salary or 0) }}</b></div>
+          </div>
+        </div>
+      </div>
+
+    {% else %}
+      <div class="stat-card">
+        <div class="stat-info">
+          <span class="stat-value">--</span>
+          <span class="stat-label">No employees found for this date.</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

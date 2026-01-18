@@ -64,7 +64,7 @@ def role_required(*allowed_roles):
 
 # ==================== ROUTES ====================
 from flask import render_template
-from db import get_connection
+
 
 @app.route('/products')
 def products():
@@ -3310,7 +3310,7 @@ def page_not_found(e):
 def internal_error(e):
     return render_template('base.html', error='Internal server error'), 500
 
-from datetime import date
+
 
 @app.route('/')
 @login_required
@@ -3449,6 +3449,48 @@ def dashboard():
         employee_status=employee_status
     )
 
+
+from flask import request, render_template
+
+
+@app.route("/reports/employee-attendance")
+@login_required
+@role_required("admin")
+def employee_attendance_report():
+    # date filter (default = today)
+    day = request.args.get("date")
+    if not day:
+        day = date.today().strftime("%Y-%m-%d")
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("""
+        SELECT
+            u.full_name,
+            u.email,
+            DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
+            DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
+            a.hours_worked,
+            a.daily_salary,
+            CASE
+                WHEN a.check_in IS NULL THEN 'Not checked in'
+                WHEN a.check_out IS NULL THEN 'Working'
+                ELSE 'Checked out'
+            END AS status
+        FROM users u
+        LEFT JOIN employee_attendance a
+            ON a.user_id = u.user_id AND a.work_date = %s
+        WHERE u.role = 'employee'
+        ORDER BY u.full_name
+    """, (day,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template("report_employee_attendance.html", rows=rows, day=day)
 
 
 if __name__ == '__main__':

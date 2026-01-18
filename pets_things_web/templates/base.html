@@ -95,6 +95,9 @@
                         <li><a href="/reports/sales-analytics" class="dropdown-link">Sales Analytics</a></li>
                         <li><a href="/reports/top-products" class="dropdown-link">Top Products</a></li>
                         <li><a href="{{ url_for('occupancy_analytics') }}" class="dropdown-link">Occupancy Analytics</a></li>
+                        {% if session.get('role') == 'admin' %}
+<li><a href="{{ url_for('employee_attendance_report') }}" class="dropdown-link">Employee Attendance</a></li>
+{% endif %}
                     </ul>
                 </li>
                 {% endif %}
