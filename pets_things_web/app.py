@@ -462,6 +462,7 @@ def edit_product(product_id):
         conn.close()
 
 ############
+
 @app.route("/products/<int:product_id>/delete", methods=["POST"])
 @role_required("admin", "employee")
 def delete_product(product_id):
@@ -473,12 +474,44 @@ def delete_product(product_id):
     try:
         cur = conn.cursor(dictionary=True)
 
+        # ✅ Check if product is used in any transactions
+        cur.execute("""
+            SELECT 
+                (SELECT COUNT(*) FROM purchase_line WHERE product_id = %s) AS purchase_count,
+                (SELECT COUNT(*) FROM sale_line WHERE product_id = %s) AS sale_count,
+                (SELECT COUNT(*) FROM warehouse_stock WHERE product_id = %s) AS warehouse_count,
+                (SELECT COUNT(*) FROM branch_stock WHERE product_id = %s) AS branch_count
+        """, (product_id, product_id, product_id, product_id))
+        
+        usage = cur.fetchone()
+        
+        # If product is used anywhere, don't delete - just deactivate
+        if (usage['purchase_count'] > 0 or usage['sale_count'] > 0 or 
+            usage['warehouse_count'] > 0 or usage['branch_count'] > 0):
+            
+            # Instead of deleting, mark as inactive
+            cur.execute("""
+                UPDATE product 
+                SET is_active = 0 
+                WHERE product_id = %s
+            """, (product_id,))
+            conn.commit()
+            
+            flash("Product has transaction history and cannot be deleted. It has been deactivated instead.", "warning")
+            return redirect(url_for("products"))
+        
+        # If product has no dependencies, safe to delete
         cur.execute("DELETE FROM product WHERE product_id = %s", (product_id,))
         conn.commit()
 
         flash("Product deleted successfully.", "success")
         return redirect(url_for("products"))
 
+    except Exception as e:
+        conn.rollback()
+        print(f"Delete product error: {e}")
+        flash("Error deleting product.", "danger")
+        return redirect(url_for("products"))
     finally:
         cur.close()
         conn.close()
@@ -794,9 +827,9 @@ def transfer_stock():
             conn.close()
             
             
-# =========================================================
-# NEW: PURCHASES ROUTE (supplier → warehouse)
-# =========================================================
+# ============================================================
+# SECTION 5: PURCHASE ROUTES
+# ============================================================
 
 @app.route('/purchases/new', methods=['GET', 'POST'])
 @role_required('admin', 'employee')
@@ -809,14 +842,12 @@ def purchase_new():
     cur = conn.cursor(dictionary=True)
 
     try:
-        # Dropdown data
         cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
         warehouses = cur.fetchall()
 
         cur.execute("SELECT supplier_id, name FROM supplier ORDER BY name")
         suppliers = cur.fetchall()
 
-        # (not required on this page, but you already use it elsewhere)
         cur.execute("SELECT product_id, product_name, unit_price FROM product WHERE is_active = 1 ORDER BY product_name")
         products = cur.fetchall()
 
@@ -835,25 +866,12 @@ def purchase_new():
 
             performed_by = session.get('user_id')
 
-            # Get supplier name (snapshot, optional if you keep purchase.supplier_name)
-            cur.execute("SELECT name FROM supplier WHERE supplier_id = %s", (supplier_id,))
-            sup = cur.fetchone()
-            if not sup:
-                flash("Selected supplier not found.", "warning")
-                return render_template('purchase_form.html',
-                                       warehouses=warehouses,
-                                       suppliers=suppliers,
-                                       products=products,
-                                       selected_warehouse_id=warehouse_id,
-                                       selected_supplier_id=supplier_id)
-
-            supplier_name = sup["name"]
-
             try:
+                # ✅ FIXED: Remove supplier_name and total_amount from INSERT
                 cur.execute("""
-                    INSERT INTO purchase (warehouse_id, supplier_id, supplier_name, total_amount, performed_by)
-                    VALUES (%s, %s, %s, 0.00, %s)
-                """, (warehouse_id, supplier_id, supplier_name, performed_by))
+                    INSERT INTO purchase (warehouse_id, supplier_id, performed_by)
+                    VALUES (%s, %s, %s)
+                """, (warehouse_id, supplier_id, performed_by))
 
                 purchase_id = cur.lastrowid
                 conn.commit()
@@ -872,7 +890,6 @@ def purchase_new():
                                        selected_warehouse_id=warehouse_id,
                                        selected_supplier_id=supplier_id)
 
-        # GET
         return render_template('purchase_form.html',
                                warehouses=warehouses,
                                suppliers=suppliers,
@@ -885,12 +902,9 @@ def purchase_new():
         conn.close()
 
 
-
-
 @app.route('/purchases/<int:purchase_id>')
 @role_required('admin', 'employee')
 def purchase_detail(purchase_id):
-    """View and manage purchase details."""
     conn = get_connection()
     if not conn:
         flash("Database connection failed.", "danger")
@@ -899,31 +913,32 @@ def purchase_detail(purchase_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Get purchase header
+        # ✅ FIXED: Compute total_amount and get supplier name from supplier table
         cur.execute("""
-    SELECT
-        p.purchase_id,
-        p.warehouse_id,
-        w.warehouse_name,
-        p.purchase_date,
-        COALESCE(s.name, p.supplier_name) AS supplier_name,
-        p.total_amount,
-        p.performed_by,
-        u.full_name AS performed_by_name
-    FROM purchase p
-    JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-    JOIN users u ON p.performed_by = u.user_id
-    LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
-    WHERE p.purchase_id = %s
-""", (purchase_id,))
-
+            SELECT
+                p.purchase_id,
+                p.warehouse_id,
+                w.warehouse_name,
+                p.purchase_date,
+                s.name AS supplier_name,
+                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
+                p.performed_by,
+                u.full_name AS performed_by_name
+            FROM purchase p
+            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+            JOIN users u ON p.performed_by = u.user_id
+            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
+            WHERE p.purchase_id = %s
+            GROUP BY p.purchase_id, p.warehouse_id, w.warehouse_name, p.purchase_date,
+                     s.name, p.performed_by, u.full_name
+        """, (purchase_id,))
         
         purchase = cur.fetchone()
         if not purchase:
             flash("Purchase not found.", "warning")
             return redirect(url_for('purchases_list'))
 
-        # Get products for dropdown
         cur.execute("""
             SELECT product_id, product_name, unit_price
             FROM product
@@ -932,7 +947,7 @@ def purchase_detail(purchase_id):
         """)
         products = cur.fetchall()
 
-        # Get purchase lines
+        # ✅ FIXED: Compute line_total in SELECT
         cur.execute("""
             SELECT
                 pl.purchase_line_id,
@@ -940,7 +955,7 @@ def purchase_detail(purchase_id):
                 p.product_name,
                 pl.quantity,
                 pl.unit_cost,
-                pl.line_total
+                (pl.quantity * pl.unit_cost) AS line_total
             FROM purchase_line pl
             JOIN product p ON pl.product_id = p.product_id
             WHERE pl.purchase_id = %s
@@ -967,7 +982,6 @@ def purchase_detail(purchase_id):
 @app.route('/purchases/<int:purchase_id>/add-item', methods=['POST'])
 @role_required('admin', 'employee')
 def purchase_add_item(purchase_id):
-    """Add item to purchase."""
     product_id = request.form.get('product_id', type=int)
     quantity = request.form.get('quantity', type=int)
     unit_cost = request.form.get('unit_cost', type=float)
@@ -984,7 +998,6 @@ def purchase_add_item(purchase_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Check if item already exists
         cur.execute("""
             SELECT purchase_line_id, quantity, unit_cost
             FROM purchase_line
@@ -994,22 +1007,20 @@ def purchase_add_item(purchase_id):
         existing = cur.fetchone()
 
         if existing:
-            # Update existing line
             new_qty = existing['quantity'] + quantity
-            new_total = new_qty * unit_cost
             
+            # ✅ FIXED: Remove line_total from UPDATE
             cur.execute("""
                 UPDATE purchase_line
-                SET quantity = %s, unit_cost = %s, line_total = %s
+                SET quantity = %s, unit_cost = %s
                 WHERE purchase_line_id = %s
-            """, (new_qty, unit_cost, new_total, existing['purchase_line_id']))
+            """, (new_qty, unit_cost, existing['purchase_line_id']))
         else:
-            # Insert new line
-            line_total = quantity * unit_cost
+            # ✅ FIXED: Remove line_total from INSERT
             cur.execute("""
-                INSERT INTO purchase_line (purchase_id, product_id, quantity, unit_cost, line_total)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (purchase_id, product_id, quantity, unit_cost, line_total))
+                INSERT INTO purchase_line (purchase_id, product_id, quantity, unit_cost)
+                VALUES (%s, %s, %s, %s)
+            """, (purchase_id, product_id, quantity, unit_cost))
 
         conn.commit()
         flash("Item added to purchase.", "success")
@@ -1028,7 +1039,6 @@ def purchase_add_item(purchase_id):
 @app.route('/purchases/<int:purchase_id>/complete', methods=['POST'])
 @role_required('admin', 'employee')
 def purchase_complete(purchase_id):
-    """Complete purchase and update warehouse stock."""
     conn = get_connection()
     if not conn:
         flash("Database connection failed.", "danger")
@@ -1038,7 +1048,6 @@ def purchase_complete(purchase_id):
         performed_by = session.get("user_id")
         cur = conn.cursor(dictionary=True)
 
-        # Get purchase header
         cur.execute("SELECT warehouse_id FROM purchase WHERE purchase_id = %s", (purchase_id,))
         purchase = cur.fetchone()
         if not purchase:
@@ -1048,9 +1057,8 @@ def purchase_complete(purchase_id):
 
         warehouse_id = purchase['warehouse_id']
 
-        # Get purchase lines
         cur.execute("""
-            SELECT product_id, quantity, line_total
+            SELECT product_id, quantity
             FROM purchase_line
             WHERE purchase_id = %s
         """, (purchase_id,))
@@ -1061,12 +1069,10 @@ def purchase_complete(purchase_id):
             flash("Add at least one item before completing.", "warning")
             return redirect(url_for('purchase_detail', purchase_id=purchase_id))
 
-        # Update warehouse stock and log movements
         for line in lines:
             product_id = line['product_id']
             qty = line['quantity']
 
-            # Increase warehouse stock
             cur.execute("""
                 UPDATE warehouse_stock
                 SET on_hand_qty = on_hand_qty + %s,
@@ -1074,7 +1080,6 @@ def purchase_complete(purchase_id):
                 WHERE warehouse_id = %s AND product_id = %s
             """, (qty, warehouse_id, product_id))
 
-            # Log movement
             cur.execute("""
                 INSERT INTO stock_movement
                     (warehouse_id, product_id, change_qty, movement_type,
@@ -1082,14 +1087,7 @@ def purchase_complete(purchase_id):
                 VALUES (%s, %s, %s, 'PURCHASE', %s, %s)
             """, (warehouse_id, product_id, qty, purchase_id, performed_by))
 
-        # Update purchase total
-        total_amount = sum(float(l['line_total']) for l in lines)
-        cur.execute("""
-            UPDATE purchase
-            SET total_amount = %s
-            WHERE purchase_id = %s
-        """, (total_amount, purchase_id))
-
+        # ✅ FIXED: No need to update total_amount (it's computed)
         conn.commit()
         flash("Purchase completed. Warehouse stock updated.", "success")
         return redirect(url_for('purchases_list'))
@@ -1109,7 +1107,6 @@ def purchase_complete(purchase_id):
 @app.route('/purchases')
 @role_required('admin', 'employee')
 def purchases_list():
-    """List all purchases."""
     conn = get_connection()
     if not conn:
         return render_template('purchases.html', purchases=[], warehouses=[], error="DB connection failed")
@@ -1117,16 +1114,13 @@ def purchases_list():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Filters
         warehouse_id = request.args.get('warehouse_id', type=int)
         date_from = (request.args.get('date_from') or '').strip()
         date_to = (request.args.get('date_to') or '').strip()
 
-        # Get warehouses for filter
         cur.execute("SELECT warehouse_id, warehouse_name FROM warehouse ORDER BY warehouse_name")
         warehouses = cur.fetchall()
 
-        # Build query
         conditions = []
         params = []
 
@@ -1146,24 +1140,26 @@ def purchases_list():
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
+        # ✅ FIXED: Get supplier name from supplier table and compute total_amount
         cur.execute(f"""
-    SELECT
-        p.purchase_id,
-        p.purchase_date,
-        w.warehouse_name,
-        p.supplier_id,
-        COALESCE(s.name, p.supplier_name, 'Unknown') AS supplier_name,
-        p.total_amount,
-        u.full_name AS performed_by_name
-    FROM purchase p
-    JOIN warehouse w ON p.warehouse_id = w.warehouse_id
-    JOIN users u ON p.performed_by = u.user_id
-    LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
-    {where_clause}
-    ORDER BY p.purchase_date DESC
-""", params)
-
-
+            SELECT
+                p.purchase_id,
+                p.purchase_date,
+                w.warehouse_name,
+                p.supplier_id,
+                COALESCE(s.name, 'Unknown') AS supplier_name,
+                COALESCE(SUM(pl.quantity * pl.unit_cost), 0) AS total_amount,
+                u.full_name AS performed_by_name
+            FROM purchase p
+            JOIN warehouse w ON p.warehouse_id = w.warehouse_id
+            JOIN users u ON p.performed_by = u.user_id
+            LEFT JOIN supplier s ON p.supplier_id = s.supplier_id
+            LEFT JOIN purchase_line pl ON p.purchase_id = pl.purchase_id
+            {where_clause}
+            GROUP BY p.purchase_id, p.purchase_date, w.warehouse_name, 
+                     p.supplier_id, s.name, u.full_name
+            ORDER BY p.purchase_date DESC
+        """, params)
 
         purchases = cur.fetchall()
 
@@ -1399,6 +1395,10 @@ def get_today_sales_summary():
             conn.close()
 
 
+# ============================================================
+# SECTION 4: SALES ROUTES
+# ============================================================
+
 @app.route("/sales/new", methods=["GET", "POST"])
 @role_required("admin", "employee")
 def sales_new():
@@ -1410,12 +1410,9 @@ def sales_new():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # 1) Load branches for dropdown
         cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
         branches = cur.fetchall()
 
-        # 2) Load customers (optional)
-        # If you store customers as users with role='customer'
         cur.execute("""
             SELECT user_id, full_name
             FROM users
@@ -1429,7 +1426,7 @@ def sales_new():
             customer_id_raw = request.form.get("customer_id", "").strip()
             customer_id = int(customer_id_raw) if customer_id_raw else None
 
-            employee_id = session.get("user_id")  # who is doing the sale
+            employee_id = session.get("user_id")
 
             if not branch_id:
                 flash("Please select a branch.", "warning")
@@ -1439,11 +1436,11 @@ def sales_new():
                                        selected_branch_id=branch_id,
                                        selected_customer_id=customer_id)
 
-            # 3) Insert sale header
-            cur2 = conn.cursor()  # normal cursor is fine for insert
+            # ✅ FIXED: Remove total_amount from INSERT
+            cur2 = conn.cursor()
             cur2.execute("""
-                INSERT INTO sale (branch_id, employee_id, customer_id, total_amount)
-                VALUES (%s, %s, %s, 0.00)
+                INSERT INTO sale (branch_id, employee_id, customer_id)
+                VALUES (%s, %s, %s)
             """, (branch_id, employee_id, customer_id))
             conn.commit()
 
@@ -1453,7 +1450,6 @@ def sales_new():
             flash("Sale created. Add items now.", "success")
             return redirect(url_for("sale_detail", sale_id=sale_id))
 
-        # GET
         return render_template("sales_new.html",
                                branches=branches,
                                customers=customers,
@@ -1465,7 +1461,6 @@ def sales_new():
             cur.close()
         if conn and conn.is_connected():
             conn.close()
-        conn.close()
 
 
 @app.route("/sales/<int:sale_id>")
@@ -1479,7 +1474,7 @@ def sale_detail(sale_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # 1) Get sale header
+        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute("""
             SELECT
                 s.sale_id,
@@ -1490,12 +1485,15 @@ def sale_detail(sale_id):
                 e.full_name AS employee_name,
                 s.customer_id,
                 cu.full_name AS customer_name,
-                s.total_amount
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_amount
             FROM sale s
             JOIN branch b ON s.branch_id = b.branch_id
             JOIN users e ON s.employee_id = e.user_id
             LEFT JOIN users cu ON s.customer_id = cu.user_id
+            LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
             WHERE s.sale_id = %s
+            GROUP BY s.sale_id, s.branch_id, b.branch_name, s.sale_date, 
+                     s.employee_id, e.full_name, s.customer_id, cu.full_name
         """, (sale_id,))
         sale = cur.fetchone()
 
@@ -1503,7 +1501,6 @@ def sale_detail(sale_id):
             flash("Sale not found.", "warning")
             return redirect(url_for("sales_new"))
 
-        # 2) Products dropdown (active only)
         cur.execute("""
             SELECT product_id, product_name, unit_price
             FROM product
@@ -1512,7 +1509,7 @@ def sale_detail(sale_id):
         """)
         products = cur.fetchall()
 
-        # 3) Sale lines
+        # ✅ FIXED: Compute line_total in SELECT
         cur.execute("""
             SELECT
                 sl.sale_line_id,
@@ -1520,7 +1517,7 @@ def sale_detail(sale_id):
                 p.product_name,
                 sl.quantity,
                 sl.unit_price,
-                sl.line_total
+                (sl.quantity * sl.unit_price) AS line_total
             FROM sale_line sl
             JOIN product p ON sl.product_id = p.product_id
             WHERE sl.sale_id = %s
@@ -1528,7 +1525,6 @@ def sale_detail(sale_id):
         """, (sale_id,))
         lines = cur.fetchall()
 
-        # 4) Compute total from lines (safe)
         total = sum(float(l["line_total"]) for l in lines) if lines else 0.0
 
         return render_template(
@@ -1544,6 +1540,7 @@ def sale_detail(sale_id):
         cur.close()
         conn.close()
 
+
 @app.route("/sales/<int:sale_id>/receipt")
 @role_required("admin", "employee")
 def sale_receipt(sale_id):
@@ -1555,12 +1552,12 @@ def sale_receipt(sale_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Sale header
+        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute("""
             SELECT
                 s.sale_id,
                 s.sale_date,
-                s.total_amount,
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_amount,
                 b.branch_name,
                 e.full_name AS employee_name,
                 cu.full_name AS customer_name
@@ -1568,7 +1565,9 @@ def sale_receipt(sale_id):
             JOIN branch b ON s.branch_id = b.branch_id
             JOIN users e ON s.employee_id = e.user_id
             LEFT JOIN users cu ON s.customer_id = cu.user_id
+            LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
             WHERE s.sale_id = %s
+            GROUP BY s.sale_id, s.sale_date, b.branch_name, e.full_name, cu.full_name
         """, (sale_id,))
         sale = cur.fetchone()
 
@@ -1576,13 +1575,13 @@ def sale_receipt(sale_id):
             flash("Sale not found.", "warning")
             return redirect(url_for("sales_list"))
 
-        # Sale lines
+        # ✅ FIXED: Compute line_total in SELECT
         cur.execute("""
             SELECT
                 p.product_name,
                 sl.quantity,
                 sl.unit_price,
-                sl.line_total
+                (sl.quantity * sl.unit_price) AS line_total
             FROM sale_line sl
             JOIN product p ON sl.product_id = p.product_id
             WHERE sl.sale_id = %s
@@ -1618,7 +1617,6 @@ def sale_add_item(sale_id):
     try:
         cur = conn.cursor(dictionary=True)
 
-        # 1) Get product price (price at time of sale)
         cur.execute("SELECT unit_price FROM product WHERE product_id = %s", (product_id,))
         p = cur.fetchone()
         if not p:
@@ -1627,7 +1625,6 @@ def sale_add_item(sale_id):
 
         unit_price = float(p["unit_price"])
 
-        # 2) Check if this product already exists in sale_line for this sale
         cur.execute("""
             SELECT sale_line_id, quantity
             FROM sale_line
@@ -1637,21 +1634,20 @@ def sale_add_item(sale_id):
 
         if existing:
             new_qty = int(existing["quantity"]) + qty
-            new_total = new_qty * unit_price
 
+            # ✅ FIXED: Remove line_total from UPDATE
             cur.execute("""
                 UPDATE sale_line
                 SET quantity = %s,
-                    unit_price = %s,
-                    line_total = %s
+                    unit_price = %s
                 WHERE sale_line_id = %s
-            """, (new_qty, unit_price, new_total, existing["sale_line_id"]))
+            """, (new_qty, unit_price, existing["sale_line_id"]))
         else:
-            line_total = qty * unit_price
+            # ✅ FIXED: Remove line_total from INSERT
             cur.execute("""
-                INSERT INTO sale_line (sale_id, product_id, quantity, unit_price, line_total)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (sale_id, product_id, qty, unit_price, line_total))
+                INSERT INTO sale_line (sale_id, product_id, quantity, unit_price)
+                VALUES (%s, %s, %s, %s)
+            """, (sale_id, product_id, qty, unit_price))
 
         conn.commit()
         flash("Item added.", "success")
@@ -1667,6 +1663,7 @@ def sale_add_item(sale_id):
         cur.close()
         conn.close()
 
+
 @app.route("/sales/<int:sale_id>/complete", methods=["POST"])
 @role_required("admin", "employee")
 def sale_complete(sale_id):
@@ -1679,7 +1676,6 @@ def sale_complete(sale_id):
         performed_by = session.get("user_id")
         cur = conn.cursor(dictionary=True)
 
-        # Get sale header
         cur.execute("SELECT sale_id, branch_id FROM sale WHERE sale_id = %s", (sale_id,))
         sale = cur.fetchone()
         if not sale:
@@ -1689,9 +1685,8 @@ def sale_complete(sale_id):
 
         branch_id = sale["branch_id"]
 
-        # Get sale lines
         cur.execute("""
-            SELECT product_id, quantity, line_total
+            SELECT product_id, quantity
             FROM sale_line
             WHERE sale_id = %s
         """, (sale_id,))
@@ -1702,12 +1697,10 @@ def sale_complete(sale_id):
             flash("Add at least one item before completing the sale.", "warning")
             return redirect(url_for("sale_detail", sale_id=sale_id))
 
-        # Check branch stock and deduct
         for line in lines:
             pid = line["product_id"]
             qty = int(line["quantity"])
 
-            # Lock branch stock
             cur.execute("""
                 SELECT on_hand_qty
                 FROM branch_stock
@@ -1727,28 +1720,19 @@ def sale_complete(sale_id):
                 flash(f"Not enough stock for product #{pid}. Available: {on_hand}.", "warning")
                 return redirect(url_for("sale_detail", sale_id=sale_id))
 
-            # Deduct stock
             cur.execute("""
                 UPDATE branch_stock
                 SET on_hand_qty = on_hand_qty - %s
                 WHERE branch_id = %s AND product_id = %s
             """, (qty, branch_id, pid))
 
-            # Log movement
             cur.execute("""
                 INSERT INTO stock_movement
                     (branch_id, product_id, change_qty, movement_type, reference_sale_id, performed_by)
                 VALUES (%s, %s, %s, 'SALE', %s, %s)
             """, (branch_id, pid, -qty, sale_id, performed_by))
 
-        # Update sale total
-        total_amount = sum(float(str(l["line_total"])) for l in lines)
-        cur.execute("""
-            UPDATE sale
-            SET total_amount = %s
-            WHERE sale_id = %s
-        """, (total_amount, sale_id))
-
+        # ✅ FIXED: No need to update total_amount (it's computed)
         conn.commit()
         flash("Sale completed successfully. Stock updated.", "success")
         return redirect(url_for("sales_list"))
@@ -1775,16 +1759,13 @@ def sales_list():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Filters
         branch_id = request.args.get("branch_id", type=int)
-        date_from = (request.args.get("date_from") or "").strip()   # "YYYY-MM-DD"
-        date_to = (request.args.get("date_to") or "").strip()       # "YYYY-MM-DD"
+        date_from = (request.args.get("date_from") or "").strip()
+        date_to = (request.args.get("date_to") or "").strip()
 
-        # Dropdown branches
         cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
         branches = cur.fetchall()
 
-        # Build dynamic WHERE
         conditions = []
         params = []
 
@@ -1804,7 +1785,7 @@ def sales_list():
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
-        # Main query
+        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute(f"""
             SELECT
                 s.sale_id,
@@ -1812,12 +1793,14 @@ def sales_list():
                 b.branch_name,
                 e.full_name AS employee_name,
                 cu.full_name AS customer_name,
-                s.total_amount
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_amount
             FROM sale s
             JOIN branch b ON s.branch_id = b.branch_id
             JOIN users e ON s.employee_id = e.user_id
             LEFT JOIN users cu ON s.customer_id = cu.user_id
+            LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
             {where_clause}
+            GROUP BY s.sale_id, s.sale_date, b.branch_name, e.full_name, cu.full_name
             ORDER BY s.sale_date DESC
         """, params)
 
@@ -1889,6 +1872,10 @@ def inject_dashboard_metrics():
 
     return data
 
+# ============================================================
+# SECTION 7: REPORTS WITH COMPUTED TOTALS
+# ============================================================
+
 @app.route("/reports/top-products")
 @role_required("admin", "employee")
 def report_top_products():
@@ -1902,23 +1889,20 @@ def report_top_products():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Filters
         branch_id = request.args.get("branch_id", type=int)
-        date_from = (request.args.get("date_from") or "").strip()   # YYYY-MM-DD
-        date_to = (request.args.get("date_to") or "").strip()       # YYYY-MM-DD
+        date_from = (request.args.get("date_from") or "").strip()
+        date_to = (request.args.get("date_to") or "").strip()
 
-        metric = (request.args.get("metric") or "qty").strip().lower()   # qty | revenue
+        metric = (request.args.get("metric") or "qty").strip().lower()
         metric = metric if metric in ("qty", "revenue") else "qty"
 
         top_n = request.args.get("top", default=10, type=int)
         if top_n not in (5, 10, 20, 50):
             top_n = 10
 
-        # Branch dropdown
         cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
         branches = cur.fetchall()
 
-        # Build WHERE
         conditions = []
         params = []
 
@@ -1938,16 +1922,16 @@ def report_top_products():
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
-        # Order by chosen metric
         order_sql = "total_qty DESC" if metric == "qty" else "total_revenue DESC"
 
+        # ✅ FIXED: Compute total_revenue using quantity * unit_price
         query = f"""
             SELECT
                 p.product_id,
                 p.product_name,
                 c.category_name,
                 SUM(sl.quantity) AS total_qty,
-                SUM(sl.line_total) AS total_revenue
+                SUM(sl.quantity * sl.unit_price) AS total_revenue
             FROM sale_line sl
             JOIN sale s      ON sl.sale_id = s.sale_id
             JOIN product p   ON sl.product_id = p.product_id
@@ -1995,15 +1979,12 @@ def sales_analytics():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Filters (GET params)
         branch_id = request.args.get("branch_id", type=int)
-        date_from = (request.args.get("date_from") or "").strip()  # YYYY-MM-DD
-        date_to = (request.args.get("date_to") or "").strip()      # YYYY-MM-DD
-        group_by = (request.args.get("group_by") or "day").strip().lower()  # day|month
+        date_from = (request.args.get("date_from") or "").strip()
+        date_to = (request.args.get("date_to") or "").strip()
+        group_by = (request.args.get("group_by") or "day").strip().lower()
         group_by = group_by if group_by in ("day", "month") else "day"
 
-        # Default date range if empty (last 30 days)
-        # (This keeps the page useful the first time you open it.)
         if not date_to:
             cur.execute("SELECT CURDATE() AS d")
             date_to = str(cur.fetchone()["d"])
@@ -2011,11 +1992,9 @@ def sales_analytics():
             cur.execute("SELECT DATE_SUB(%s, INTERVAL 30 DAY) AS d", (date_to,))
             date_from = str(cur.fetchone()["d"])
 
-        # Branch dropdown
         cur.execute("SELECT branch_id, branch_name FROM branch ORDER BY branch_name")
         branches = cur.fetchall()
 
-        # WHERE builder
         conditions = ["DATE(s.sale_date) >= %s", "DATE(s.sale_date) <= %s"]
         params = [date_from, date_to]
 
@@ -2025,18 +2004,24 @@ def sales_analytics():
 
         where_clause = "WHERE " + " AND ".join(conditions)
 
-        # 1) KPI summary
+        # ✅ FIXED: KPI summary with computed revenue
         cur.execute(f"""
             SELECT
-                COUNT(*) AS sale_count,
-                COALESCE(SUM(s.total_amount), 0) AS total_revenue,
-                COALESCE(AVG(s.total_amount), 0) AS avg_sale
+                COUNT(DISTINCT s.sale_id) AS sale_count,
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_revenue,
+                COALESCE(AVG(sale_totals.sale_total), 0) AS avg_sale
             FROM sale s
+            LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
+            LEFT JOIN (
+                SELECT sale_id, SUM(quantity * unit_price) AS sale_total
+                FROM sale_line
+                GROUP BY sale_id
+            ) sale_totals ON s.sale_id = sale_totals.sale_id
             {where_clause}
         """, params)
         summary = cur.fetchone()
 
-        # 2) Trend (daily/monthly)
+        # ✅ FIXED: Trend with computed revenue
         if group_by == "month":
             label_sql = "DATE_FORMAT(s.sale_date, '%Y-%m')"
         else:
@@ -2045,8 +2030,9 @@ def sales_analytics():
         cur.execute(f"""
             SELECT
                 {label_sql} AS label,
-                COALESCE(SUM(s.total_amount), 0) AS revenue
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS revenue
             FROM sale s
+            LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
             {where_clause}
             GROUP BY label
             ORDER BY label ASC
@@ -2056,12 +2042,12 @@ def sales_analytics():
         chart_labels = [str(r["label"]) for r in trend_rows]
         chart_values = [float(r["revenue"]) for r in trend_rows]
 
-        # 3) Top categories
+        # ✅ FIXED: Top categories with computed revenue
         cur.execute(f"""
             SELECT
                 c.category_name,
                 COALESCE(SUM(sl.quantity), 0) AS total_qty,
-                COALESCE(SUM(sl.line_total), 0) AS total_revenue
+                COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_revenue
             FROM sale_line sl
             JOIN sale s      ON sl.sale_id = s.sale_id
             JOIN product p   ON sl.product_id = p.product_id
@@ -2477,20 +2463,23 @@ def admin_bookings():
 
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute(f"""
             SELECT
-              b.booking_id, b.date_from, b.date_to, b.status, b.total_amount, b.created_at,
-              u.full_name AS customer_name
+              b.booking_id, b.date_from, b.date_to, b.status, b.created_at,
+              u.full_name AS customer_name,
+              COALESCE(SUM(br.nights * br.price_per_night * (1 - br.discount_percent/100)), 0) AS total_amount
             FROM booking b
             JOIN users u ON b.customer_id = u.user_id
+            LEFT JOIN booking_room br ON b.booking_id = br.booking_id
             {where_clause}
+            GROUP BY b.booking_id, b.date_from, b.date_to, b.status, b.created_at, u.full_name
             ORDER BY b.created_at DESC
             LIMIT 200
         """, params)
 
         rows = cur.fetchall()
 
-        # attach line details
         for r in rows:
             cur.execute("""
                 SELECT r2.room_number, c.cat_name
@@ -2567,19 +2556,26 @@ def my_bookings():
     try:
         cur = conn.cursor(dictionary=True)
 
+        # ✅ FIXED: Compute total_amount in SELECT
         cur.execute("""
             SELECT
-              b.booking_id, b.date_from, b.date_to, b.status, b.total_amount, b.created_at
+              b.booking_id, b.date_from, b.date_to, b.status, b.created_at,
+              COALESCE(SUM(br.nights * br.price_per_night * (1 - br.discount_percent/100)), 0) AS total_amount
             FROM booking b
+            LEFT JOIN booking_room br ON b.booking_id = br.booking_id
             WHERE b.customer_id = %s
+            GROUP BY b.booking_id, b.date_from, b.date_to, b.status, b.created_at
             ORDER BY b.created_at DESC
         """, (user_id,))
         bookings = cur.fetchall()
 
-        # Load rooms/cats for each booking (simple approach)
+        # ✅ FIXED: Compute line_total for each booking_room
         for bk in bookings:
             cur.execute("""
-                SELECT r.room_number, c.cat_name, br.line_total
+                SELECT 
+                    r.room_number, 
+                    c.cat_name,
+                    (br.nights * br.price_per_night * (1 - br.discount_percent/100)) AS line_total
                 FROM booking_room br
                 JOIN room r ON br.room_id = r.room_id
                 JOIN cat c ON br.cat_id = c.cat_id
@@ -2619,8 +2615,6 @@ def booking_new():
     try:
         cur = conn.cursor(dictionary=True)
 
-        # Load customer cats (saved)
-        # If employee/admin is creating booking for customer, later we can add customer selector
         cur.execute("""
             SELECT cat_id, cat_name
             FROM cat
@@ -2629,7 +2623,6 @@ def booking_new():
         """, (user_id,))
         cats = cur.fetchall()
 
-        # Load available rooms for the range
         cur.execute("""
             SELECT r.room_id, r.room_number, r.room_type
             FROM room r
@@ -2648,10 +2641,9 @@ def booking_new():
         rooms = cur.fetchall()
 
         if request.method == "POST":
-            selected_cat_ids = request.form.getlist("cat_ids")      # list of strings
-            selected_room_ids = request.form.getlist("room_ids")    # list of strings
+            selected_cat_ids = request.form.getlist("cat_ids")
+            selected_room_ids = request.form.getlist("room_ids")
 
-            # Validate counts: cats == rooms
             if not selected_cat_ids:
                 flash("Select at least one cat.", "warning")
                 df = datetime.strptime(date_from, "%Y-%m-%d").date()
@@ -2678,11 +2670,9 @@ def booking_new():
                                        nights=nights, discount=discount, price_per_night=price_per_night,
                                        base_per_room=base_per_room, line_total_per_room=line_total_per_room)
 
-            # Convert to ints
             selected_cat_ids = [int(x) for x in selected_cat_ids]
             selected_room_ids = [int(x) for x in selected_room_ids]
 
-            # Basic date validation in DB and app
             df = datetime.strptime(date_from, "%Y-%m-%d").date()
             dt = datetime.strptime(date_to, "%Y-%m-%d").date()
             nights, discount = calc_nights_and_discount(df, dt)
@@ -2696,13 +2686,8 @@ def booking_new():
                                        nights=nights, discount=discount, price_per_night=price_per_night,
                                        base_per_room=base_per_room, line_total_per_room=line_total_per_room)
 
-            # Price
             price_per_night = 30.0
-            line_base = nights * price_per_night
-            line_total = line_base * (1 - discount / 100.0)
-            total_amount = line_total * len(selected_room_ids)
 
-            # Re-check availability for each selected room (lock)
             for rid in selected_room_ids:
                 cur.execute("""
                     SELECT r.room_id
@@ -2715,7 +2700,6 @@ def booking_new():
                     flash("One selected room is invalid.", "danger")
                     return redirect(url_for("booking_search", date_from=date_from, date_to=date_to))
 
-                # Overlap check
                 cur.execute("""
                     SELECT 1
                     FROM booking_room br
@@ -2732,31 +2716,29 @@ def booking_new():
                     flash("A selected room just became unavailable. Please search again.", "warning")
                     return redirect(url_for("booking_search", date_from=date_from, date_to=date_to))
 
-            # Create booking header
             customer_id = user_id
             created_by = user_id
 
+            # ✅ FIXED: Remove total_amount from INSERT
             cur.execute("""
-                INSERT INTO booking (customer_id, date_from, date_to, status, created_by, total_amount)
-                VALUES (%s, %s, %s, 'PENDING', %s, %s)
-            """, (customer_id, date_from, date_to, created_by, total_amount))
+                INSERT INTO booking (customer_id, date_from, date_to, status, created_by)
+                VALUES (%s, %s, %s, 'PENDING', %s)
+            """, (customer_id, date_from, date_to, created_by))
             booking_id = cur.lastrowid
 
-            # Insert booking lines (pair each cat with a room)
-            # simple pairing: cat_ids[i] -> room_ids[i]
+            # ✅ FIXED: Remove line_total from INSERT
             for i in range(len(selected_cat_ids)):
                 cur.execute("""
                     INSERT INTO booking_room
-                      (booking_id, room_id, cat_id, nights, price_per_night, discount_percent, line_total)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                      (booking_id, room_id, cat_id, nights, price_per_night, discount_percent)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (booking_id, selected_room_ids[i], selected_cat_ids[i],
-                      nights, price_per_night, discount, line_total))
+                      nights, price_per_night, discount))
 
             conn.commit()
             flash("Booking created! (Status: PENDING)", "success")
             return redirect(url_for("my_bookings"))
 
-        # GET: show price preview basic
         df = datetime.strptime(date_from, "%Y-%m-%d").date()
         dt = datetime.strptime(date_to, "%Y-%m-%d").date()
         nights, discount = calc_nights_and_discount(df, dt)
@@ -3111,7 +3093,10 @@ def occupancy_analytics():
             pass
 
 
-######emplyee
+# ============================================================
+# SECTION 1: EMPLOYEE ATTENDANCE ROUTES
+# ============================================================
+
 @app.route("/employee/check-in", methods=["POST"])
 @role_required("employee")
 def employee_check_in():
@@ -3121,7 +3106,7 @@ def employee_check_in():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
 
-    # create today row if not exists
+    # ✅ FIXED: Only insert check_in timestamp, no computed columns
     cur.execute("""
         INSERT INTO employee_attendance (user_id, work_date, check_in)
         VALUES (%s, %s, NOW())
@@ -3145,12 +3130,7 @@ def employee_check_out():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
 
-    # get hourly rate
-    cur.execute("SELECT hourly_rate FROM employee WHERE user_id=%s", (user_id,))
-    emp = cur.fetchone()
-    hourly_rate = float(emp["hourly_rate"]) if emp else 0.0
-
-    # get today's attendance
+    # Get today's attendance
     cur.execute("""
         SELECT attendance_id, check_in
         FROM employee_attendance
@@ -3164,21 +3144,27 @@ def employee_check_out():
         conn.close()
         return redirect(url_for("dashboard"))
 
-    check_in_time = row["check_in"]
-    check_out_time = datetime.now()
-
-    # compute hours
-    seconds = (check_out_time - check_in_time).total_seconds()
-    hours_worked = round(seconds / 3600, 2)
-
-    daily_salary = round(hours_worked * hourly_rate, 2)
-
-    # update attendance
+    # ✅ FIXED: Only update check_out timestamp, no computed columns
     cur.execute("""
         UPDATE employee_attendance
-        SET check_out=%s, hours_worked=%s, daily_salary=%s
+        SET check_out = NOW()
         WHERE attendance_id=%s
-    """, (check_out_time, hours_worked, daily_salary, row["attendance_id"]))
+    """, (row["attendance_id"],))
+
+    # ✅ Compute hours and salary for flash message only (not stored)
+    cur.execute("""
+        SELECT 
+            ROUND(TIMESTAMPDIFF(MINUTE, check_in, NOW())/60, 2) AS hours_worked,
+            e.hourly_rate
+        FROM employee_attendance ea
+        JOIN employee e ON e.user_id = ea.user_id
+        WHERE ea.attendance_id = %s
+    """, (row["attendance_id"],))
+    
+    result = cur.fetchone()
+    hours_worked = result['hours_worked'] if result else 0
+    hourly_rate = result['hourly_rate'] if result else 0
+    daily_salary = round(hours_worked * float(hourly_rate), 2)
 
     conn.commit()
     cur.close()
@@ -3312,6 +3298,10 @@ def internal_error(e):
 
 
 
+# ============================================================
+# SECTION 2: DASHBOARD - EMPLOYEE ATTENDANCE DISPLAY
+# ============================================================
+
 @app.route('/')
 @login_required
 def dashboard():
@@ -3330,8 +3320,8 @@ def dashboard():
     today_sales = {"total_sales": 0, "total_revenue": 0}
     active_bookings = 0
 
-    today_attendance = None     # employee-only
-    employee_status = []        # admin-only
+    today_attendance = None
+    employee_status = []
 
     if conn:
         try:
@@ -3346,31 +3336,39 @@ def dashboard():
                 cur.execute("SELECT COUNT(*) AS cnt FROM branch_stock WHERE on_hand_qty <= min_qty")
                 low_stock_count = cur.fetchone()["cnt"]
 
-            # Today's sales
+            # ✅ FIXED: Today's sales with computed total_revenue
             if role in ['admin', 'employee']:
                 cur.execute("""
                     SELECT 
                         COUNT(*) AS total_sales,
-                        COALESCE(SUM(total_amount), 0) AS total_revenue
-                    FROM sale
-                    WHERE DATE(sale_date) = CURDATE()
+                        COALESCE(SUM(sl.quantity * sl.unit_price), 0) AS total_revenue
+                    FROM sale s
+                    LEFT JOIN sale_line sl ON s.sale_id = sl.sale_id
+                    WHERE DATE(s.sale_date) = CURDATE()
                 """)
                 today_sales = cur.fetchone() or today_sales
 
-            # ✅ Employee attendance for today (EMPLOYEE VIEW)
+            # ✅ FIXED: Employee attendance with computed hours_worked and daily_salary
             if role == 'employee':
                 cur.execute("""
                     SELECT 
-                        DATE_FORMAT(check_in, '%H:%i') AS check_in,
-                        DATE_FORMAT(check_out, '%H:%i') AS check_out,
-                        hours_worked,
-                        daily_salary
-                    FROM employee_attendance
-                    WHERE user_id=%s AND work_date=%s
+                        DATE_FORMAT(ea.check_in, '%H:%i') AS check_in,
+                        DATE_FORMAT(ea.check_out, '%H:%i') AS check_out,
+                        CASE 
+                            WHEN ea.check_in IS NULL OR ea.check_out IS NULL THEN 0
+                            ELSE ROUND(TIMESTAMPDIFF(MINUTE, ea.check_in, ea.check_out)/60, 2)
+                        END AS hours_worked,
+                        CASE 
+                            WHEN ea.check_in IS NULL OR ea.check_out IS NULL THEN 0
+                            ELSE ROUND(TIMESTAMPDIFF(MINUTE, ea.check_in, ea.check_out)/60 * e.hourly_rate, 2)
+                        END AS daily_salary
+                    FROM employee_attendance ea
+                    JOIN employee e ON e.user_id = ea.user_id
+                    WHERE ea.user_id=%s AND ea.work_date=%s
                 """, (user_id, date.today()))
                 today_attendance = cur.fetchone()
 
-            # ✅ Admin: status of all employees today (ADMIN VIEW)
+            # ✅ FIXED: Admin employee status with computed columns
             if role == 'admin':
                 cur.execute("""
                     SELECT
@@ -3378,8 +3376,14 @@ def dashboard():
                         u.email,
                         DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
                         DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
-                        a.hours_worked,
-                        a.daily_salary,
+                        CASE 
+                            WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                            ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60, 2)
+                        END AS hours_worked,
+                        CASE 
+                            WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                            ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60 * e.hourly_rate, 2)
+                        END AS daily_salary,
                         CASE
                             WHEN a.check_in IS NULL THEN 'Not checked in'
                             WHEN a.check_out IS NULL THEN 'Working'
@@ -3388,6 +3392,7 @@ def dashboard():
                     FROM users u
                     LEFT JOIN employee_attendance a
                         ON a.user_id = u.user_id AND a.work_date = CURDATE()
+                    LEFT JOIN employee e ON e.user_id = u.user_id
                     WHERE u.role = 'employee'
                     ORDER BY u.full_name
                 """)
@@ -3399,7 +3404,6 @@ def dashboard():
             cur.close()
             conn.close()
 
-    # Role-specific content (you can keep this)
     content = {
         'admin': {
             'title': 'Admin Dashboard',
@@ -3453,11 +3457,14 @@ def dashboard():
 from flask import request, render_template
 
 
+# ============================================================
+# SECTION 3: EMPLOYEE ATTENDANCE REPORT
+# ============================================================
+
 @app.route("/reports/employee-attendance")
 @login_required
 @role_required("admin")
 def employee_attendance_report():
-    # date filter (default = today)
     day = request.args.get("date")
     if not day:
         day = date.today().strftime("%Y-%m-%d")
@@ -3465,14 +3472,21 @@ def employee_attendance_report():
     conn = get_connection()
     cur = conn.cursor(dictionary=True)
 
+    # ✅ FIXED: Compute hours_worked and daily_salary in SELECT
     cur.execute("""
         SELECT
             u.full_name,
             u.email,
             DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
             DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
-            a.hours_worked,
-            a.daily_salary,
+            CASE 
+                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60, 2)
+            END AS hours_worked,
+            CASE 
+                WHEN a.check_in IS NULL OR a.check_out IS NULL THEN 0
+                ELSE ROUND(TIMESTAMPDIFF(MINUTE, a.check_in, a.check_out)/60 * e.hourly_rate, 2)
+            END AS daily_salary,
             CASE
                 WHEN a.check_in IS NULL THEN 'Not checked in'
                 WHEN a.check_out IS NULL THEN 'Working'
@@ -3481,6 +3495,7 @@ def employee_attendance_report():
         FROM users u
         LEFT JOIN employee_attendance a
             ON a.user_id = u.user_id AND a.work_date = %s
+        LEFT JOIN employee e ON e.user_id = u.user_id
         WHERE u.role = 'employee'
         ORDER BY u.full_name
     """, (day,))

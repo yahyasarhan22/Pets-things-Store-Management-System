@@ -26,6 +26,12 @@ CREATE TABLE employee (
     hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
+-- 1) employee_attendance
+-- Remove derived attributes
+-- =========================
+ALTER TABLE employee_attendance
+  DROP COLUMN hours_worked,
+  DROP COLUMN daily_salary;
 
 CREATE TABLE employee_attendance (
     attendance_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -144,6 +150,12 @@ CREATE TABLE sale (
   CONSTRAINT fk_sale_customer
     FOREIGN KEY (customer_id) REFERENCES users(user_id)
 );
+-- =========================
+-- 3) sale
+-- Remove derived attribute
+-- =========================
+ALTER TABLE sale
+  DROP COLUMN total_amount;
 
 CREATE TABLE sale_line (
   sale_line_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -160,7 +172,12 @@ CREATE TABLE sale_line (
   CONSTRAINT chk_sale_line_qty
     CHECK (quantity > 0)
 );
-
+-- =========================
+-- 2) sale_line
+-- Remove derived attribute
+-- =========================
+ALTER TABLE sale_line
+  DROP COLUMN line_total;
 -- =========================================================
 -- NEW: PURCHASES (supplier → warehouse)
 -- =========================================================
@@ -179,6 +196,20 @@ CREATE TABLE purchase (
 );
 ALTER TABLE purchase
 ADD COLUMN supplier_id INT NULL;
+-- =========================
+-- 4) purchase
+-- Remove derived attributes (and redundancy)
+-- total_amount is derivable from purchase_line
+-- supplier_name is redundant if supplier_id is used
+-- =========================
+ALTER TABLE purchase
+  DROP COLUMN total_amount,
+  DROP COLUMN supplier_name;
+
+-- Optional but recommended for strict design:
+-- enforce supplier_id always exists
+-- (Only do this if your data already has supplier_id populated for all purchases)
+-- ALTER TABLE purchase MODIFY supplier_id INT NOT NULL;
 
 ALTER TABLE purchase
 ADD CONSTRAINT fk_purchase_supplier
@@ -213,6 +244,14 @@ CREATE TABLE purchase_line (
     CHECK (quantity > 0)
 );
 
+
+-- =========================
+-- 5) purchase_line
+-- Remove derived attribute
+-- =========================
+ALTER TABLE purchase_line
+  DROP COLUMN line_total;
+  
 CREATE TABLE supplier (
   supplier_id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(120) NOT NULL,
@@ -325,7 +364,12 @@ CREATE TABLE booking (
   CONSTRAINT fk_booking_created_by FOREIGN KEY (created_by) REFERENCES users(user_id),
   CONSTRAINT chk_booking_dates CHECK (date_to > date_from)
 );
-
+-- =========================
+-- 6) booking
+-- Remove derived attribute
+-- =========================
+ALTER TABLE booking
+  DROP COLUMN total_amount;
 
 
 CREATE TABLE booking_room (
@@ -346,7 +390,12 @@ CREATE TABLE booking_room (
   UNIQUE (booking_id, cat_id)
 );
 
-
+-- =========================
+-- 7) booking_room
+-- Remove derived attribute
+-- =========================
+ALTER TABLE booking_room
+  DROP COLUMN line_total;
 
 
 
