@@ -8,6 +8,10 @@ import re
 from db import get_user_by_email, create_user, email_exists
 from werkzeug.utils import secure_filename
 import time
+from datetime import datetime, date
+from flask import redirect, url_for, flash
+from db import get_connection
+from datetime import date
 
 # Load environment variables
 load_dotenv()
@@ -3107,6 +3111,82 @@ def occupancy_analytics():
             pass
 
 
+######emplyee
+@app.route("/employee/check-in", methods=["POST"])
+@role_required("employee")
+def employee_check_in():
+    user_id = session.get("user_id")
+    today = date.today()
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    # create today row if not exists
+    cur.execute("""
+        INSERT INTO employee_attendance (user_id, work_date, check_in)
+        VALUES (%s, %s, NOW())
+        ON DUPLICATE KEY UPDATE check_in = IFNULL(check_in, NOW())
+    """, (user_id, today))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("✅ Checked in successfully!", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/employee/check-out", methods=["POST"])
+@role_required("employee")
+def employee_check_out():
+    user_id = session.get("user_id")
+    today = date.today()
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+
+    # get hourly rate
+    cur.execute("SELECT hourly_rate FROM employee WHERE user_id=%s", (user_id,))
+    emp = cur.fetchone()
+    hourly_rate = float(emp["hourly_rate"]) if emp else 0.0
+
+    # get today's attendance
+    cur.execute("""
+        SELECT attendance_id, check_in
+        FROM employee_attendance
+        WHERE user_id=%s AND work_date=%s
+    """, (user_id, today))
+    row = cur.fetchone()
+
+    if not row or not row["check_in"]:
+        flash("⚠️ You must check in first.", "danger")
+        cur.close()
+        conn.close()
+        return redirect(url_for("dashboard"))
+
+    check_in_time = row["check_in"]
+    check_out_time = datetime.now()
+
+    # compute hours
+    seconds = (check_out_time - check_in_time).total_seconds()
+    hours_worked = round(seconds / 3600, 2)
+
+    daily_salary = round(hours_worked * hourly_rate, 2)
+
+    # update attendance
+    cur.execute("""
+        UPDATE employee_attendance
+        SET check_out=%s, hours_worked=%s, daily_salary=%s
+        WHERE attendance_id=%s
+    """, (check_out_time, hours_worked, daily_salary, row["attendance_id"]))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash(f"✅ Checked out! Hours: {hours_worked}, Salary: ${daily_salary}", "success")
+    return redirect(url_for("dashboard"))
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3230,6 +3310,8 @@ def page_not_found(e):
 def internal_error(e):
     return render_template('base.html', error='Internal server error'), 500
 
+from datetime import date
+
 @app.route('/')
 @login_required
 def dashboard():
@@ -3238,28 +3320,32 @@ def dashboard():
     """
     role = session.get('role')
     full_name = session.get('full_name')
-    
+    user_id = session.get('user_id')
+
     conn = get_connection()
-    
+
     # Initialize metrics
     products_count = 0
     low_stock_count = 0
     today_sales = {"total_sales": 0, "total_revenue": 0}
     active_bookings = 0
-    
+
+    today_attendance = None     # employee-only
+    employee_status = []        # admin-only
+
     if conn:
         try:
             cur = conn.cursor(dictionary=True)
-            
+
             # Products count
             cur.execute("SELECT COUNT(*) AS cnt FROM product WHERE is_active = 1")
             products_count = cur.fetchone()["cnt"]
-            
-            # Low stock (branch only - customer-facing)
+
+            # Low stock (branch only)
             if role in ['admin', 'employee']:
                 cur.execute("SELECT COUNT(*) AS cnt FROM branch_stock WHERE on_hand_qty <= min_qty")
                 low_stock_count = cur.fetchone()["cnt"]
-            
+
             # Today's sales
             if role in ['admin', 'employee']:
                 cur.execute("""
@@ -3270,18 +3356,50 @@ def dashboard():
                     WHERE DATE(sale_date) = CURDATE()
                 """)
                 today_sales = cur.fetchone() or today_sales
-            
-            # Active bookings (if you have bookings)
-            # cur.execute("SELECT COUNT(*) AS cnt FROM bookings WHERE status = 'active'")
-            # active_bookings = cur.fetchone()["cnt"]
-            
+
+            # ✅ Employee attendance for today (EMPLOYEE VIEW)
+            if role == 'employee':
+                cur.execute("""
+                    SELECT 
+                        DATE_FORMAT(check_in, '%H:%i') AS check_in,
+                        DATE_FORMAT(check_out, '%H:%i') AS check_out,
+                        hours_worked,
+                        daily_salary
+                    FROM employee_attendance
+                    WHERE user_id=%s AND work_date=%s
+                """, (user_id, date.today()))
+                today_attendance = cur.fetchone()
+
+            # ✅ Admin: status of all employees today (ADMIN VIEW)
+            if role == 'admin':
+                cur.execute("""
+                    SELECT
+                        u.full_name,
+                        u.email,
+                        DATE_FORMAT(a.check_in, '%H:%i') AS check_in,
+                        DATE_FORMAT(a.check_out, '%H:%i') AS check_out,
+                        a.hours_worked,
+                        a.daily_salary,
+                        CASE
+                            WHEN a.check_in IS NULL THEN 'Not checked in'
+                            WHEN a.check_out IS NULL THEN 'Working'
+                            ELSE 'Checked out'
+                        END AS status
+                    FROM users u
+                    LEFT JOIN employee_attendance a
+                        ON a.user_id = u.user_id AND a.work_date = CURDATE()
+                    WHERE u.role = 'employee'
+                    ORDER BY u.full_name
+                """)
+                employee_status = cur.fetchall()
+
         except Exception as e:
             print(f"Dashboard metrics error: {e}")
         finally:
             cur.close()
             conn.close()
-    
-    # Role-specific content
+
+    # Role-specific content (you can keep this)
     content = {
         'admin': {
             'title': 'Admin Dashboard',
@@ -3317,7 +3435,7 @@ def dashboard():
             'color': 'success'
         }
     }
-    
+
     return render_template(
         'dashboard.html',
         full_name=full_name,
@@ -3326,8 +3444,12 @@ def dashboard():
         products_count=products_count,
         low_stock_count=low_stock_count,
         today_sales=today_sales,
-        active_bookings=active_bookings
+        active_bookings=active_bookings,
+        today_attendance=today_attendance,
+        employee_status=employee_status
     )
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -20,6 +20,28 @@ CREATE TABLE users (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE employee (
+    employee_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL UNIQUE,
+    hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE employee_attendance (
+    attendance_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    work_date DATE NOT NULL,
+    check_in DATETIME NULL,
+    check_out DATETIME NULL,
+    hours_worked DECIMAL(5,2) DEFAULT 0,
+    daily_salary DECIMAL(10,2) DEFAULT 0,
+    UNIQUE KEY uniq_user_date (user_id, work_date),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+
+
+
 CREATE TABLE category (
   category_id INT AUTO_INCREMENT PRIMARY KEY,
   category_name VARCHAR(80) NOT NULL UNIQUE
@@ -390,6 +412,10 @@ INSERT INTO branch_stock (branch_id, product_id, on_hand_qty, min_qty) VALUES
 (1, 8, 1, 5);
 INSERT INTO room (room_number, room_type, is_active)
 VALUES ('R01','Standard',1),('R02','Standard',1),('R03','Standard',1),('R04','Standard',1),('R05','Standard',1);
+INSERT INTO employee (user_id, hourly_rate)
+VALUES (3, 12.00)
+ON DUPLICATE KEY UPDATE hourly_rate=12.00;
+
 
 select * from users;
 select * from supplier;

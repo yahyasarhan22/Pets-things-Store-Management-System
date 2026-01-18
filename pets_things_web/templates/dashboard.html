@@ -18,6 +18,8 @@
         <p class="hero-subtitle">
             {% if session.get('role') == 'customer' %}
                 Browse products and manage your bookings easily
+            {% elif session.get('role') == 'employee' %}
+                Clock in/out and manage your daily shift
             {% else %}
                 Manage your pet store with ease
             {% endif %}
@@ -25,10 +27,10 @@
     </div>
 </section>
 
-{# =========================
-   ADMIN / EMPLOYEE DASHBOARD
-   ========================= #}
-{% if session.get('role') in ['admin', 'employee'] %}
+{# =====================
+   ADMIN DASHBOARD
+   ===================== #}
+{% if session.get('role') == 'admin' %}
 
 <!-- KPI Cards Section -->
 <section class="dashboard-stats">
@@ -50,7 +52,7 @@
                 <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Low Stock">
             </div>
             <div class="stat-info">
-                <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
                     <span class="stat-value">{{ low_stock_count if low_stock_count is defined else '--' }}</span>
                     {% if low_stock_count and low_stock_count > 0 %}
                         <span style="font-size: 1.2rem;">⚠️</span>
@@ -66,8 +68,8 @@
             </div>
             <div class="stat-info">
                 {% if today_sales %}
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div style="font-size:0.85rem; color: var(--text-secondary);">
                             {{ today_sales.total_sales|default(0) }} sales
                         </div>
                         <span class="stat-value" style="font-size: 1.8rem;">
@@ -93,7 +95,7 @@
     </div>
 </section>
 
-<!-- Quick Actions Section -->
+<!-- Quick Actions -->
 <section class="dashboard-actions">
     <h2 class="section-title">Quick Actions</h2>
     <div class="actions-container">
@@ -116,15 +118,115 @@
     </div>
 </section>
 
-{# =================
+<!-- ✅ Employee Attendance (Admin) — card view to match your design -->
+<section class="dashboard-actions">
+    <h2 class="section-title">Employee Attendance Today</h2>
+
+    <div class="actions-container">
+        {% for e in employee_status %}
+        <div class="action-card" style="cursor: default;">
+            <div class="action-icon">👤</div>
+
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="font-weight:700;">{{ e.full_name }}</div>
+                <div style="font-size:0.9rem; color: var(--text-secondary);">{{ e.email }}</div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+                    <span class="badge {% if e.status == 'Working' %}badge-success{% elif e.status == 'Checked out' %}badge-info{% else %}badge-muted{% endif %}">
+                        {{ e.status }}
+                    </span>
+                    <span style="font-size:0.9rem;">In: <b>{{ e.check_in or '--' }}</b></span>
+                    <span style="font-size:0.9rem;">Out: <b>{{ e.check_out or '--' }}</b></span>
+                    <span style="font-size:0.9rem;">Hours: <b>{{ e.hours_worked if e.hours_worked is not none else 0 }}</b></span>
+                    <span style="font-size:0.9rem;">Salary: <b>${{ "%.2f"|format(e.daily_salary or 0) }}</b></span>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="action-card" style="cursor: default;">
+            <div class="action-icon">ℹ️</div>
+            <span class="action-label">No employees found.</span>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+{# =====================
+   EMPLOYEE DASHBOARD
+   ===================== #}
+{% elif session.get('role') == 'employee' %}
+
+<section class="dashboard-stats">
+    <div class="stats-container">
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-sales">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Check In">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ today_attendance.check_in if today_attendance and today_attendance.check_in else '--' }}</span>
+                <span class="stat-label">Today Check In</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-stock">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Check Out">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ today_attendance.check_out if today_attendance and today_attendance.check_out else '--' }}</span>
+                <span class="stat-label">Today Check Out</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-products">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Hours">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">{{ today_attendance.hours_worked if today_attendance and today_attendance.hours_worked is not none else '0' }}</span>
+                <span class="stat-label">Hours Worked</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-bookings">
+                <img src="{{ url_for('static', filename='images/paw.png') }}" alt="Salary">
+            </div>
+            <div class="stat-info">
+                <span class="stat-value">${{ "%.2f"|format(today_attendance.daily_salary or 0) if today_attendance else "0.00" }}</span>
+                <span class="stat-label">Today Salary</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-actions">
+    <h2 class="section-title">My Shift</h2>
+    <div class="actions-container" style="grid-template-columns: repeat(2, 1fr);">
+        <form action="{{ url_for('employee_check_in') }}" method="POST">
+            <button type="submit" class="action-card" style="width:100%; border:none; background:none; cursor:pointer;">
+                <div class="action-icon">🟢</div>
+                <span class="action-label">Check In</span>
+            </button>
+        </form>
+
+        <form action="{{ url_for('employee_check_out') }}" method="POST">
+            <button type="submit" class="action-card" style="width:100%; border:none; background:none; cursor:pointer;">
+                <div class="action-icon">🔴</div>
+                <span class="action-label">Check Out</span>
+            </button>
+        </form>
+    </div>
+</section>
+
+{# =====================
    CUSTOMER DASHBOARD
-   ================= #}
+   ===================== #}
 {% else %}
 
 <section class="dashboard-actions" style="padding-top: 40px;">
     <h2 class="section-title">Quick Actions</h2>
     <div class="actions-container" style="grid-template-columns: repeat(2, 1fr);">
-        
         <a href="/products/active" class="action-card">
             <div class="action-icon">🛍️</div>
             <span class="action-label">Browse Products</span>
@@ -144,7 +246,6 @@
             <div class="action-icon">🔎</div>
             <span class="action-label">All Products</span>
         </a>
-
     </div>
 </section>
 
